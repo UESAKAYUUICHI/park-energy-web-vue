@@ -1,0 +1,8 @@
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useSessionStore } from '@/stores/session'
+const username = ref('admin'); const password = ref('123456'); const error = ref(''); const pending = ref(false); const router = useRouter(); const route = useRoute(); const session = useSessionStore(); const unavailable = computed(() => error.value.includes('服务不可用') || error.value.includes('服务暂不可用') || error.value.includes('无法连接'))
+async function submit() { pending.value = true; error.value = ''; try { await session.signIn(username.value, password.value); await router.push(String(route.query.redirect || '/dashboard')) } catch (e) { error.value = e instanceof Error ? e.message : '登录失败' } finally { pending.value = false } }
+</script>
+<template><div class="login-page"><section class="login-copy"><div class="brand"><i></i><span>智园能管<small>ENERGY PLATFORM</small></span></div><div><p class="eyebrow">PARK ENERGY OPERATIONS</p><h1>能源计费、运营与设备控制一体化平台</h1><p>以受权限和组织范围约束的实时数据，支持园区能耗运营闭环。</p></div><small>Platform API · Access · Data</small></section><main class="login-card"><p class="eyebrow">WELCOME BACK</p><h2>登录系统</h2><p>使用平台已创建的账号进入工作区。</p><form @submit.prevent="submit"><label>登录账号<input v-model.trim="username" autocomplete="username" required></label><label>登录密码<input v-model="password" type="password" autocomplete="current-password" required></label><p v-if="error" class="form-error"><b>{{ unavailable ? '服务不可用：' : '登录失败：' }}</b>{{ error }}</p><button class="primary" :disabled="pending">{{ pending ? '正在登录…' : '登录' }}</button></form><p class="tip">当前系统不提供自行注册，请联系管理员创建账号。</p></main></div></template>
