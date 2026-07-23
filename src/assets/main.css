@@ -43,11 +43,18 @@
 .login-register{color:#47759f}
 .login-help{color:#0d2b57}
 .protocol-link{color:#7eb9ff}
-.login-consent-dialog{width:min(360px,calc(100vw - 36px));padding:18px 20px 16px;border:1px solid rgba(166,197,240,.8);border-radius:10px;background:rgba(255,255,255,.92);box-shadow:0 18px 44px rgba(18,73,146,.14)}
-.login-consent-dialog h2{margin:0 0 8px;font:700 20px/1.2 Georgia,"Noto Serif SC",serif;color:#0d2b57}
-.login-consent-dialog p{margin:0;color:#5f7fa4;font-size:13px;line-height:1.75}
-.login-consent-dialog .dialog-actions{padding:14px 0 0;border-top:0;background:transparent}
-.login-consent-dialog .primary,.login-consent-dialog .quiet{height:34px;padding:0 14px}
-.login-consent-backdrop{align-items:center;justify-content:center;background:transparent}
+.login-agreement-backdrop{align-items:center;justify-content:center;background:transparent}
+.login-agreement-dialog{width:min(860px,calc(100vw - 32px));max-height:88vh;display:flex;flex-direction:column;padding:22px 24px 18px;border:1px solid rgba(166,197,240,.9);border-radius:12px;background:rgba(255,255,255,.96);box-shadow:0 24px 60px rgba(18,73,146,.16)}
+.agreement-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding-bottom:14px;border-bottom:1px solid rgba(175,199,228,.55)}
+.agreement-head h2{margin:5px 0 0;font:700 23px/1.15 Georgia,"Noto Serif SC",serif;color:#0d2b57}
+.agreement-head .eyebrow{color:#2f86ff}
+.agreement-body{flex:1;min-height:0;overflow:auto;padding:18px 4px 8px;color:#27415f;font-size:13px;line-height:1.95;scrollbar-width:none;-ms-overflow-style:none}
+.agreement-body::-webkit-scrollbar{display:none}
+.agreement-body p{margin:0 0 12px;text-indent:2em}
+.agreement-actions{display:flex;justify-content:flex-end;gap:10px;padding-top:14px;border-top:1px solid rgba(175,199,228,.55)}
+.agreement-actions .primary,.agreement-actions .quiet{height:38px;padding:0 16px}
+.agreement-actions .primary:disabled{background:#b9cce4;color:#fff;cursor:not-allowed}
+.login-agreement-dialog .close-icon{width:34px;height:34px;border-radius:8px;background:rgba(239,246,255,.9);color:#2f86ff}
+.login-agreement-dialog .close-icon:hover{background:#eaf3ff}
 .profile-grid{display:grid;grid-template-columns:1fr 1.18fr;gap:15px}.profile-session-card,.profile-rbac-card{min-height:100%}.profile-user-card{display:flex;align-items:center;gap:14px;padding:14px 0 16px;border-bottom:1px solid var(--border)}.profile-avatar{width:50px;height:50px;display:grid;place-items:center;border-radius:12px;background:linear-gradient(180deg,#d9e9ff,#eff5ff);color:#2563eb;font:800 22px/1 Georgia,"Noto Serif SC",serif}.profile-user-card b{display:block;font-size:15px}.profile-user-card span{display:block;margin-top:4px;color:var(--muted);font-size:12px}.profile-flow{display:grid;grid-template-columns:minmax(0,1fr) 20px minmax(0,1fr) 20px minmax(0,1fr);gap:10px;align-items:start;padding-top:16px}.profile-flow i{align-self:center;color:#8aa4c4;font-style:normal;font-size:20px;text-align:center}.profile-flow section strong{display:block;margin-bottom:8px;font-size:12px;color:#3f4f67}.profile-tags{display:flex;flex-wrap:wrap;gap:7px}.profile-tags .tag{max-width:100%;white-space:normal;line-height:1.3}.profile-stat-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}.profile-stat-row div{padding:12px;border:1px solid var(--border);border-radius:8px;background:#fafdff}.profile-stat-row span{display:block;color:var(--muted);font-size:11px}.profile-stat-row b{display:block;margin-top:8px;font:700 20px/1 ui-monospace,Consolas,monospace}.rbac-map{display:grid;gap:10px}.rbac-map-row{display:grid;grid-template-columns:minmax(120px,.8fr) 20px minmax(110px,.6fr) 20px minmax(0,1.3fr);gap:10px;align-items:center;padding:12px;border:1px solid var(--border);border-radius:8px;background:#fff}.rbac-map-row i{font-style:normal;color:#8aa4c4;text-align:center}.rbac-map-cell,.rbac-map-role{min-width:0}.rbac-map-cell small,.rbac-map-role small{display:block;margin-bottom:5px;color:var(--muted);font-size:11px}.rbac-map-cell span,.rbac-map-role b{display:inline-flex;align-items:center;min-height:22px;padding:3px 7px;margin:0 6px 6px 0;border-radius:4px;background:var(--bg);font-size:12px}.rbac-map-cell.permissions span{background:#eef6ff;color:#2463d1}.rbac-map-cell .more{background:#f4f7fb;color:var(--muted)}.profile-rbac-card .empty-state{min-height:120px}
 .permission-groups{display:grid;gap:7px}.permission-group{display:flex;align-items:center;flex-wrap:wrap;gap:5px;padding:7px;border:1px solid #e4edf8;border-radius:7px;background:#f8fbff}.permission-group b{display:inline-flex;align-items:center;min-height:22px;margin-right:2px;padding:3px 7px;border-radius:4px;background:#dfeeff;color:#225ca8;font-size:12px}.permission-group span{margin:0!important;background:#eef6ff!important;color:#2463d1!important}.permission-group em{font-style:normal;color:var(--muted);font-size:12px}
