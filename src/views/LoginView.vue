@@ -96,7 +96,7 @@ onMounted(randomCaptcha)
       <div class="brand"><i></i><span>智园能管<small>ENERGY PLATFORM</small></span></div>
       <div class="login-copy-body">
         <p class="eyebrow">PARK ENERGY OPERATIONS</p>
-        <h1>智慧能源管理平台</h1>
+        <h1>AI全域能源精益计量运营平台</h1>
         <div class="login-accent"></div>
       </div>
     </section>
@@ -107,7 +107,7 @@ onMounted(randomCaptcha)
         <QrCode :size="18" />
       </div>
       <p class="eyebrow">登录系统</p>
-      <h2>智慧能源管理平台</h2>
+      <h2>综合能源智慧运营平台</h2>
       <div class="login-underline"></div>
       <form class="login-form" @submit.prevent="submit">
         <label class="login-field">
