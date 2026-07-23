@@ -125,9 +125,7 @@ onMounted(randomCaptcha)
     <div v-if="consentDialog" class="drawer-backdrop modal-backdrop login-consent-backdrop" @click.self="setConsentDialog(false)">
       <section class="login-consent-dialog">
         <h2>登录协议确认</h2>
-        <p>
-          登录即同意<span class="protocol-link">《智园能管用户须知协议》</span>，点击“是”将自动勾选并继续登录；点击“取消”则不登录。
-        </p>
+        <p>登录即同意<span class="protocol-link">《智园能管用户须知协议》</span>。</p>
         <div class="dialog-actions">
           <button class="primary" @click="confirmConsent">是</button>
           <button class="quiet" @click="setConsentDialog(false)">取消</button>
