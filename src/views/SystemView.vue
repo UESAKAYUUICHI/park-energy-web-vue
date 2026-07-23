@@ -11,7 +11,7 @@ import type { RecordRow } from '@/types/domain'
 import { useSessionStore } from '@/stores/session'
 import { fieldLabel } from '@/utils/fieldLabels'
 
-const route = useRoute(); const session = useSessionStore(); const mode = computed(() => String(route.meta.kind)); const title = computed(() => String(route.meta.title)); const rows = ref<RecordRow[]>([]); const relations = ref<RecordRow>({}); const selected = ref<RecordRow | null>(null); const keyword = ref(''); const pageNum = ref(1); const total = ref(0); const loading = ref(false); const error = ref(''); const dialog = ref(false); const editingId = ref<unknown>(null); const form = reactive<Record<string, string | number>>({}); const relationDialog = ref(false); const relationTitle = ref(''); const relationTargetId = ref<unknown>(null); const relationMode = ref<'password' | 'roles' | 'permissions' | 'scopes'>('roles'); const relationText = ref(''); const expandedPermissionIds = ref<Set<string>>(new Set()); const deleteDialog = ref(false); const deletingRow = ref<RecordRow | null>(null); const deleting = ref(false); const orgOptions = ref<RecordRow[]>([])
+const route = useRoute(); const session = useSessionStore(); const mode = computed(() => String(route.meta.kind)); const title = computed(() => String(route.meta.title)); const rows = ref<RecordRow[]>([]); const relations = ref<RecordRow>({}); const selected = ref<RecordRow | null>(null); const keyword = ref(''); const pageNum = ref(1); const total = ref(0); const loading = ref(false); const error = ref(''); const dialog = ref(false); const editingId = ref<unknown>(null); const form = reactive<Record<string, string | number>>({}); const relationDialog = ref(false); const relationTitle = ref(''); const relationTargetId = ref<unknown>(null); const relationMode = ref<'password' | 'roles' | 'permissions' | 'scopes'>('roles'); const relationText = ref(''); const expandedPermissionIds = ref<Set<string>>(new Set()); const deleteDialog = ref(false); const deletingRow = ref<RecordRow | null>(null); const deleting = ref(false); const orgOptions = ref<RecordRow[]>([]); const relationUsers = ref<RecordRow[]>([]); const relationRoles = ref<RecordRow[]>([]); const relationPermissions = ref<RecordRow[]>([])
 const configuration = computed(() => ({ users: { endpoint: 'users', permission: 'system:user', columns: [{ key: 'username', label: '登录名' }, { key: 'nickname', label: '姓名' }, { key: 'orgId', label: '默认组织' }, { key: 'status', label: '状态' }], fields: ['username', 'nickname', 'password', 'orgId', 'phone', 'email', 'status'], defaults: { username: '', nickname: '', password: '', orgId: '', phone: '', email: '', status: 1 } }, roles: { endpoint: 'roles', permission: 'system:role', columns: [{ key: 'roleCode', label: '角色编码' }, { key: 'roleName', label: '角色名称' }, { key: 'dataScope', label: '数据范围' }, { key: 'status', label: '状态' }], fields: ['roleCode', 'roleName', 'dataScope', 'remark', 'status'], defaults: { roleCode: '', roleName: '', dataScope: 1, remark: '', status: 1 } }, permissions: { endpoint: 'permissions', permission: 'system:permission', columns: [{ key: 'permCode', label: '权限码' }, { key: 'permName', label: '权限名称' }, { key: 'permType', label: '类型' }, { key: 'parentId', label: '上级 ID' }, { key: 'sort', label: '排序' }], fields: ['permCode', 'permName', 'permType', 'parentId', 'routePath', 'componentPath', 'icon', 'sort', 'status'], defaults: { permCode: '', permName: '', permType: 3, parentId: 0, routePath: '', componentPath: '', icon: '', sort: 0, status: 1 } } } as Record<string, { endpoint: string; permission: string; columns: Array<{ key: string; label: string }>; fields: string[]; defaults: RecordRow }>)[mode.value])
 const canAdd = computed(() => configuration.value && session.can(`${configuration.value.permission}:add`)); const canEdit = computed(() => configuration.value && session.can(`${configuration.value.permission}:edit`)); const canDelete = computed(() => configuration.value && session.can(`${configuration.value.permission}:delete`))
 const createLabel = computed(() => `+ 新增${title.value.replace(/管理$/, '')}`)
@@ -33,6 +33,42 @@ function dataScopeLabel(value: unknown): string {
 const orgName = (value: unknown): string => {
   const org = orgOptions.value.find((item) => String(item.id) === String(value))
   return org ? String(org.org_name || value) : String(value ?? '—')
+}
+const userName = (value: unknown): string => {
+  const user = relationUsers.value.find((item) => String(item.id) === String(value))
+  if (!user && String(value) === currentUserId.value) return String(profileUser.value.nickname || profileUser.value.username || value)
+  return user ? String(user.nickname || user.username || value) : String(value ?? '—')
+}
+const roleName = (value: unknown): string => {
+  const role = relationRoles.value.find((item) => String(item.id) === String(value))
+  return role ? String(role.roleName || role.role_name || role.roleCode || role.role_code || value) : String(value ?? '—')
+}
+const permissionName = (value: unknown): string => {
+  const permission = relationPermissions.value.find((item) => String(item.id) === String(value))
+  return permission ? String(permission.permName || permission.perm_name || permission.permCode || permission.perm_code || value) : String(value ?? '—')
+}
+function permissionGroupLabel(name: string) {
+  const text = name.replace(/^\d+/, '').trim()
+  if (text.includes('档案')) return '档案管理'
+  if (text.includes('权限') || text.includes('用户') || text.includes('角色')) return '权限管理'
+  if (text.includes('告警')) return '告警处置'
+  if (text.includes('计费') || text.includes('账单')) return '结算收款'
+  if (text.includes('能源') || text.includes('能耗')) return '能源运营'
+  if (text.includes('设备') || text.includes('网关') || text.includes('测点') || text.includes('协议')) return '设备档案'
+  if (text.includes('总览') || text.includes('首页')) return '经营总览'
+  return text.slice(0, 4) || '其他权限'
+}
+function permissionActionLabel(name: string, group: string) {
+  const text = name.replace(/^\d+/, '').replace(group, '').trim()
+  return text || group
+}
+function groupPermissions(names: string[]) {
+  const grouped = new Map<string, string[]>()
+  names.forEach((name) => {
+    const group = permissionGroupLabel(name)
+    grouped.set(group, [...(grouped.get(group) || []), permissionActionLabel(name, group)])
+  })
+  return [...grouped.entries()].slice(0, 4).map(([group, actions]) => ({ group, actions: [...new Set(actions)].slice(0, 3), overflow: Math.max(0, new Set(actions).size - 3) }))
 }
 const systemFormat = (key: string): TableColumn['format'] | undefined => {
   if (key === 'status') return mode.value === 'users' ? normalStatusLabel : enableStatusLabel
@@ -58,6 +94,29 @@ const auditBaseColumns: TableColumn[] = [
   { key: 'create_time', label: '时间' },
 ]
 const profileColumns: TableColumn[] = [{ key: 'username', label: '操作人' }, { key: 'module', label: '模块' }, { key: 'operation', label: '操作' }, { key: 'status', label: '结果', format: auditStatusLabel }, { key: 'cost_time', label: '耗时(ms)' }, { key: 'create_time', label: '时间' }]
+const userRoleRelations = computed(() => Array.isArray(relations.value.userRoles) ? relations.value.userRoles as RecordRow[] : [])
+const rolePermissionRelations = computed(() => Array.isArray(relations.value.rolePermissions) ? relations.value.rolePermissions as RecordRow[] : [])
+const profileUser = computed(() => session.user || {})
+const currentUserId = computed(() => String(profileUser.value.id ?? ''))
+const currentRoleBadges = computed(() => session.roles?.length ? session.roles : ['暂无角色'])
+const currentPermissionBadges = computed(() => session.permissions?.length ? session.permissions : ['暂无权限'])
+const currentOrgScopeBadges = computed(() => session.orgScopes?.length ? session.orgScopes.map((scope) => `${orgName(scope.org_id ?? scope.orgId)} · ${String(scope.scope_mode ?? scope.scopeMode ?? 'SELF').toUpperCase() === 'SUBTREE' ? '含下级' : '仅本组织'}`) : ['暂无组织范围'])
+const currentUserRoleRelations = computed(() => userRoleRelations.value.filter((item) => String(item.userId ?? item.user_id) === currentUserId.value))
+const currentRoleIds = computed(() => new Set(currentUserRoleRelations.value.map((item) => String(item.roleId ?? item.role_id))))
+const currentPermissionIds = computed(() => new Set(rolePermissionRelations.value.filter((item) => currentRoleIds.value.has(String(item.roleId ?? item.role_id))).map((item) => String(item.permissionId ?? item.permission_id))))
+const relationStats = computed(() => [
+  { label: '用户', value: currentUserId.value ? 1 : '—' },
+  { label: '角色', value: currentRoleIds.value.size || currentRoleBadges.value.length || '—' },
+  { label: '权限', value: currentPermissionIds.value.size || currentPermissionBadges.value.length || '—' },
+  { label: '组织范围', value: Array.isArray(relations.value.userOrgScopes) ? (relations.value.userOrgScopes as RecordRow[]).length : session.orgScopes.length },
+])
+const roleGraphRows = computed(() => relationRoles.value.filter((role) => currentRoleIds.value.has(String(role.id))).map((role) => {
+  const roleId = String(role.id)
+  const users = [userName(currentUserId.value)]
+  const permissions = rolePermissionRelations.value.filter((item) => String(item.roleId ?? item.role_id) === roleId).map((item) => permissionName(item.permissionId ?? item.permission_id))
+  const groups = groupPermissions(permissions)
+  return { id: roleId, role: roleName(roleId), users: users.length ? users : ['暂无绑定用户'], permissionGroups: groups.length ? groups : [{ group: '暂无权限', actions: [], overflow: 0 }], overflow: Math.max(0, permissions.length - groups.reduce((sum, group) => sum + group.actions.length, 0)) }
+}))
 const baseAuditKeys = new Set([...auditBaseColumns.map((column) => column.key), 'request_param', 'requestParam'].map(normalizeKey))
 const auditRows = computed(() => rows.value.map((row) => ({ ...row, ...auditJsonFields(row) })))
 const auditColumns = computed<TableColumn[]>(() => {
@@ -152,7 +211,7 @@ function togglePermissionNode(item: RecordRow) {
   expandedPermissionIds.value = next
   pageNum.value = 1
 }
-async function load() { loading.value = true; error.value = ''; try { if (mode.value === 'audit') { const page = await audit('operation-logs', { pageNum: pageNum.value, pageSize, keyword: keyword.value }); rows.value = page.records; total.value = page.total; return } if (mode.value === 'profile') { const [logs, snapshot] = await Promise.all([audit('my-operations', { pageNum: pageNum.value, pageSize, keyword: keyword.value }), session.can('system:role:list') ? rbac('relations') : Promise.resolve({})]); rows.value = logs.records; total.value = logs.total; relations.value = snapshot as RecordRow; return } if (!configuration.value) return; if (mode.value === 'permissions') { const value = await rbac(`${configuration.value.endpoint}?keyword=${encodeURIComponent(keyword.value)}`); const list = Array.isArray(value) ? value : []; rows.value = keyword.value ? list.filter((row) => JSON.stringify(row).toLowerCase().includes(keyword.value.toLowerCase())) : list; total.value = rows.value.length; return } const page = await rbacPage(configuration.value.endpoint, { pageNum: pageNum.value, pageSize, keyword: keyword.value }); rows.value = page.records; total.value = page.total } catch (e) { error.value = e instanceof Error ? e.message : '系统数据读取失败'; rows.value = []; total.value = 0 } finally { loading.value = false } }
+async function load() { loading.value = true; error.value = ''; try { if (mode.value === 'audit') { const page = await audit('operation-logs', { pageNum: pageNum.value, pageSize, keyword: keyword.value }); rows.value = page.records; total.value = page.total; return } if (mode.value === 'profile') { const requests = [audit('my-operations', { pageNum: pageNum.value, pageSize, keyword: keyword.value }), session.can('system:role:list') ? rbac('relations') : Promise.resolve({}), session.can('system:user:list') ? rbacPage('users', { pageNum: 1, pageSize: 500 }) : Promise.resolve({ records: [] }), session.can('system:role:list') ? rbacPage('roles', { pageNum: 1, pageSize: 500 }) : Promise.resolve({ records: [] }), session.can('system:permission:list') ? rbac('permissions') : Promise.resolve([]), listResource('archive', 'orgs', { pageSize: 500 })] as const; const [logs, snapshot, usersPage, rolesPage, permissionsList, orgsPage] = await Promise.all(requests); rows.value = logs.records; total.value = logs.total; relations.value = snapshot as RecordRow; relationUsers.value = (usersPage as { records?: RecordRow[] }).records || []; relationRoles.value = (rolesPage as { records?: RecordRow[] }).records || []; relationPermissions.value = Array.isArray(permissionsList) ? permissionsList as RecordRow[] : []; orgOptions.value = (orgsPage as { records?: RecordRow[] }).records || []; return } if (!configuration.value) return; if (mode.value === 'permissions') { const value = await rbac(`${configuration.value.endpoint}?keyword=${encodeURIComponent(keyword.value)}`); const list = Array.isArray(value) ? value : []; rows.value = keyword.value ? list.filter((row) => JSON.stringify(row).toLowerCase().includes(keyword.value.toLowerCase())) : list; total.value = rows.value.length; return } const page = await rbacPage(configuration.value.endpoint, { pageNum: pageNum.value, pageSize, keyword: keyword.value }); rows.value = page.records; total.value = page.total } catch (e) { error.value = e instanceof Error ? e.message : '系统数据读取失败'; rows.value = []; total.value = 0 } finally { loading.value = false } }
 async function loadLookups() { try { orgOptions.value = (await listResource('archive', 'orgs', { pageSize: 500 })).records } catch { orgOptions.value = [] } }
 function query() { if (keywordTimer) clearTimeout(keywordTimer); pageNum.value = 1; load() }
 function resetSearch() { if (keywordTimer) clearTimeout(keywordTimer); ignoreNextKeywordWatch = keyword.value !== ''; keyword.value = ''; pageNum.value = 1; load() }
@@ -174,7 +233,38 @@ onBeforeUnmount(() => { if (keywordTimer) clearTimeout(keywordTimer) })
 </script>
 <template>
   <section class="view-page system-page"><header class="view-head"><div><p class="eyebrow">SYSTEM & ACCESS CONTROL</p><h1>{{ title }}</h1><p>{{ mode === 'profile' ? '会话与审计。' : mode === 'audit' ? '操作审计。' : 'RBAC 管理。' }}</p></div></header>
-    <template v-if="mode === 'profile'"><div class="two-panel"><article class="panel"><div class="panel-head"><h3>当前会话</h3><small>认证与组织范围</small></div><pre>{{ JSON.stringify({ user: session.user, roles: session.roles, permissions: session.permissions, orgScopes: session.orgScopes }, null, 2) }}</pre></article><article class="panel"><div class="panel-head"><h3>RBAC 关系快照</h3><small v-if="!session.can('system:role:list')">当前账号无查看权限</small></div><pre>{{ JSON.stringify(relations, null, 2) }}</pre></article></div></template>
+    <template v-if="mode === 'profile'">
+      <div class="profile-grid">
+        <article class="panel profile-session-card">
+          <div class="panel-head"><div><h3>当前会话</h3><small>认证与组织范围</small></div></div>
+          <div class="profile-user-card">
+            <div class="profile-avatar">{{ String(profileUser.nickname || profileUser.username || '用').slice(0, 1) }}</div>
+            <div><b>{{ profileUser.nickname || profileUser.username || '当前用户' }}</b><span>{{ profileUser.username || '—' }} / {{ profileUser.phone || profileUser.email || '未配置联系方式' }}</span></div>
+          </div>
+          <div class="profile-flow">
+            <section><strong>角色</strong><div class="profile-tags"><span v-for="item in currentRoleBadges" :key="String(item)" class="tag blue">{{ item }}</span></div></section>
+            <i>→</i>
+            <section><strong>权限</strong><div class="profile-tags"><span v-for="item in currentPermissionBadges.slice(0, 12)" :key="String(item)" class="tag success">{{ item }}</span><span v-if="currentPermissionBadges.length > 12" class="tag muted">+{{ currentPermissionBadges.length - 12 }}</span></div></section>
+            <i>→</i>
+            <section><strong>组织范围</strong><div class="profile-tags"><span v-for="item in currentOrgScopeBadges" :key="String(item)" class="tag warn">{{ item }}</span></div></section>
+          </div>
+        </article>
+        <article class="panel profile-rbac-card">
+          <div class="panel-head"><div><h3>RBAC 关系图谱</h3><small v-if="!session.can('system:role:list')">当前账号无查看权限</small><small v-else>当前用户 → 角色 → 权限</small></div></div>
+          <div class="profile-stat-row"><div v-for="item in relationStats" :key="item.label"><span>{{ item.label }}</span><b>{{ item.value }}</b></div></div>
+          <div v-if="session.can('system:role:list')" class="rbac-map">
+            <div v-for="row in roleGraphRows" :key="row.id" class="rbac-map-row">
+              <div class="rbac-map-cell"><small>用户</small><span v-for="user in row.users" :key="user">{{ user }}</span></div>
+              <i>→</i>
+              <div class="rbac-map-role"><small>角色</small><b>{{ row.role }}</b></div>
+              <i>→</i>
+              <div class="rbac-map-cell permissions"><small>权限</small><div class="permission-groups"><div v-for="group in row.permissionGroups" :key="group.group" class="permission-group"><b>{{ group.group }}</b><span v-for="action in group.actions" :key="action">{{ action }}</span><em v-if="group.overflow">+{{ group.overflow }}</em></div><span v-if="row.overflow" class="more">+{{ row.overflow }}</span></div></div>
+            </div>
+            <div v-if="!roleGraphRows.length" class="empty-state">暂无 RBAC 关系。</div>
+          </div>
+        </article>
+      </div>
+    </template>
     <FilterBar v-model:keyword="keyword" :busy="loading" :show-reset="false" @query="query" @reset="resetSearch"><template #actions><button v-if="canAdd" class="primary add-action" @click="openCreate()">{{ createLabel }}</button><button class="icon-btn" title="刷新" aria-label="刷新" @click="query"><RefreshCw :size="16" /></button></template></FilterBar>
     <template v-if="mode === 'permissions'"><article class="archive-tree-panel permission-dict-tree"><div v-if="loading" class="empty-state">正在读取权限字典...</div><div v-else-if="!permissionRows.length" class="empty-state">暂无权限字典。</div><div v-for="entry in pagedPermissionRows" v-else :key="String(entry.item.id)" class="archive-tree-row permission-tree-row" :style="{ paddingLeft: `${10 + entry.level * 24}px` }"><button class="tree-toggle" :class="{ placeholder: !hasPermissionChildren(entry.item) }" :disabled="!hasPermissionChildren(entry.item)" :title="expandedPermissionIds.has(String(entry.item.id)) ? '收起' : '展开'" @click="togglePermissionNode(entry.item)"><ChevronDown v-if="expandedPermissionIds.has(String(entry.item.id))" :size="15" /><ChevronRight v-else :size="15" /></button><span class="tag" :class="Number(entry.item.permType ?? entry.item.perm_type) === 3 ? 'blue' : Number(entry.item.permType ?? entry.item.perm_type) === 2 ? 'warn' : 'success'">{{ Number(entry.item.permType ?? entry.item.perm_type) === 3 ? '按钮' : Number(entry.item.permType ?? entry.item.perm_type) === 2 ? '菜单' : '目录' }}</span><div class="tree-main"><b>{{ entry.item.permName || entry.item.perm_name }}</b><small>{{ entry.item.permCode || entry.item.perm_code }} / parent: {{ entry.item.parentId ?? entry.item.parent_id ?? 0 }}</small></div><div class="row-actions"><button class="icon-btn" title="详情" aria-label="详情" @click="selected = entry.item"><Eye :size="16" /></button><button v-if="canAdd && canCreatePermissionChild(entry.item)" class="icon-btn" title="新增子项目" aria-label="新增子项目" @click="openCreate(entry.item)"><Plus :size="16" /></button><button v-if="canEdit" class="icon-btn" title="编辑" aria-label="编辑" @click="openEdit(entry.item)"><Pencil :size="16" /></button><button v-if="canDelete" class="icon-btn danger-text" title="删除" aria-label="删除" @click="openDelete(entry.item)"><Trash2 :size="16" /></button></div></div></article><div v-if="displayTotal > 0" class="table-pagination system-tree-pagination"><span>共 {{ displayTotal }} 条</span><button class="quiet" :disabled="pageNum <= 1" @click="previousPage">上一页</button><b>{{ pageNum }} / {{ pageCount }}</b><button class="quiet" :disabled="pageNum >= pageCount" @click="nextPage">下一页</button></div></template>
     <AppDataTable v-else :pageable="true" :page-size="pageSize" :current-page="pageNum" :total="total" :hide-actions="mode === 'audit'" :columns="mode === 'audit' ? auditColumns : mode === 'profile' ? profileColumns : systemColumns" :rows="mode === 'audit' ? auditRows : rows" :loading="loading" :error="error" @refresh="load" @page-change="changePage"><template #actions="{ row }"><button v-if="canEdit" class="icon-btn" title="编辑" aria-label="编辑" @click="openEdit(row)"><Pencil :size="16" /></button><button v-if="mode === 'users' && session.can('system:user:edit')" class="icon-btn" title="分配角色" aria-label="分配角色" @click="openRelation(row, 'roles')"><UserRoundCog :size="16" /></button><button v-if="mode === 'users' && session.can('system:user:edit')" class="icon-btn" title="重置密码" aria-label="重置密码" @click="openRelation(row, 'password')"><KeyRound :size="16" /></button><button v-if="mode === 'users' && session.can('system:user:scope:edit')" class="icon-btn" title="组织范围" aria-label="组织范围" @click="openRelation(row, 'scopes')"><GitBranch :size="16" /></button><button v-if="mode === 'roles' && session.can('system:role:edit')" class="icon-btn" title="分配权限" aria-label="分配权限" @click="openRelation(row, 'permissions')"><ShieldCheck :size="16" /></button><button v-if="canDelete" class="icon-btn danger-text" title="删除" aria-label="删除" @click="openDelete(row)"><Trash2 :size="16" /></button></template></AppDataTable>
