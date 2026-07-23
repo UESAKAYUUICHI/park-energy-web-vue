@@ -11,7 +11,7 @@ interface NavGroup { key: string; label: string; icon: Component; items?: NavIte
 const route = useRoute()
 const router = useRouter()
 const session = useSessionStore()
-const openGroups = ref<string[]>(['deviceArchive', 'energy', 'alarm', 'billing', 'ops', 'system'])
+const openGroups = ref<string[]>([])
 const record = (name: string) => routeRecords.find((item) => item.name === name)
 const navIcons: Record<string, Component> = {
   dashboard: LayoutDashboard,
@@ -87,10 +87,12 @@ async function leave() { await session.signOut(); await router.push('/login') }
         <section v-for="group in nav" :key="group.key" class="nav-group" :class="{ 'is-simple': group.items && group.items.length === 1 }">
           <button v-if="!group.items || group.items.length !== 1" class="nav-group-toggle" type="button" :aria-expanded="openGroups.includes(group.key)" @click="toggle(group.key)"><span class="nav-group-label"><component :is="group.icon" class="nav-icon" :size="15" />{{ group.label }}</span><i>{{ openGroups.includes(group.key) ? '⌃' : '⌄' }}</i></button>
           <p v-else class="nav-group-label"><component :is="group.icon" class="nav-icon" :size="14" />{{ group.label }}</p>
-          <div v-if="openGroups.includes(group.key) || (group.items && group.items.length === 1)" class="nav-group-body">
-            <template v-if="group.items"><RouterLink v-for="entry in group.items.filter(visible)" :key="entry.name" :to="entry.path" class="nav-item"><component :is="entry.icon" class="nav-icon" :size="15" /><span>{{ entry.title }}</span></RouterLink></template>
-            <template v-else><section v-for="section in group.sections" :key="section.label" class="nav-subgroup"><p>{{ section.label }}</p><RouterLink v-for="entry in section.items.filter(visible)" :key="entry.name" :to="entry.path" class="nav-item"><component :is="entry.icon" class="nav-icon" :size="15" /><span>{{ entry.title }}</span></RouterLink></section></template>
-          </div>
+          <transition name="nav-collapse">
+            <div v-if="openGroups.includes(group.key) || (group.items && group.items.length === 1)" class="nav-group-body">
+              <template v-if="group.items"><RouterLink v-for="entry in group.items.filter(visible)" :key="entry.name" :to="entry.path" class="nav-item"><component :is="entry.icon" class="nav-icon" :size="15" /><span>{{ entry.title }}</span></RouterLink></template>
+              <template v-else><section v-for="section in group.sections" :key="section.label" class="nav-subgroup"><p>{{ section.label }}</p><RouterLink v-for="entry in section.items.filter(visible)" :key="entry.name" :to="entry.path" class="nav-item"><component :is="entry.icon" class="nav-icon" :size="15" /><span>{{ entry.title }}</span></RouterLink></section></template>
+            </div>
+          </transition>
         </section>
       </nav>
       <div class="side-foot"><b>● 会话有效</b><span>ORG_SCOPE / 当前授权范围</span></div>
