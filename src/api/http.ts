@@ -2,9 +2,13 @@ import { ApiError, type ApiResponse, type RemoteEnvelope } from '@/types/api'
 
 const baseUrl = import.meta.env.VITE_PLATFORM_BASE_URL || '/api/platform'
 const tokenKey = 'park-energy-token'
+const tokenNameKey = 'park-energy-token-name'
+const tokenPrefixKey = 'park-energy-token-prefix'
 export const getToken = () => sessionStorage.getItem(tokenKey)
-export const setToken = (value: string) => sessionStorage.setItem(tokenKey, value)
-export const clearToken = () => sessionStorage.removeItem(tokenKey)
+export const getTokenName = () => sessionStorage.getItem(tokenNameKey) || 'Authorization'
+export const getTokenPrefix = () => sessionStorage.getItem(tokenPrefixKey) || 'Bearer'
+export const setToken = (value: string, name = 'Authorization', prefix = 'Bearer') => { sessionStorage.setItem(tokenKey, value); sessionStorage.setItem(tokenNameKey, name); sessionStorage.setItem(tokenPrefixKey, prefix) }
+export const clearToken = () => { sessionStorage.removeItem(tokenKey); sessionStorage.removeItem(tokenNameKey); sessionStorage.removeItem(tokenPrefixKey) }
 
 export function toQuery(params: Record<string, unknown> = {}) {
   const query = new URLSearchParams()
@@ -19,7 +23,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   const headers = new Headers(init.headers)
   headers.set('Accept', 'application/json')
   const token = getToken()
-  if (token) headers.set('Authorization', `Bearer ${token}`)
+  if (token) headers.set(getTokenName(), [getTokenPrefix(), token].filter(Boolean).join(' '))
   if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   let response: Response
   try { response = await fetch(`${baseUrl}${path}`, { ...init, headers }) }
