@@ -144,6 +144,17 @@ const selectedIsGateway = computed(() => selectedNode.value?.nodeType === 'GATEW
 const selectedIsOrg = computed(() => selectedNode.value?.nodeType === 'ORG')
 const selectedNodeTitle = computed(() => selectedNode.value ? nodeLabel(selectedNode.value) : '请选择左侧节点')
 const createLabel = computed(() => `+新增${selectedNode.value ? nodeTag(selectedNode.value) : '组织'}`)
+const orgTypeOptions = [
+  { label: '园区', value: 1 },
+  { label: '企业', value: 2 },
+  { label: '楼宇', value: 3 },
+  { label: '楼层', value: 4 },
+  { label: '区域', value: 5 },
+]
+const statusOptions = [
+  { label: '启用', value: 1 },
+  { label: '停用', value: 0 },
+]
 const recentHistory = computed(() => (profile.value.recentHistory || profile.value.latestStats || []) as RecordRow[])
 const recentAlarms = computed(() => (profile.value.recentAlarms || []) as RecordRow[])
 const inspectionRecords = computed(() => (profile.value.inspectionRecords || []) as RecordRow[])
@@ -1172,30 +1183,32 @@ onBeforeUnmount(() => {
 
     <AppDialog v-model:open="dialog" :title="editingId ? '编辑档案' : '新增档案'" :description="formType === 'device' ? '按当前节点维护设备档案。' : '按当前节点维护层级档案。'" @submit="saveForm">
       <div v-if="formType === 'org'" class="dialog-fields">
-        <label class="dialog-field"><span>上级组织 ID</span><input v-model="form.parent_id" type="number"></label>
+        <label class="dialog-field"><span>上级组织</span><select v-model="form.parent_id"><option :value="0">无</option><option v-for="org in orgOptions" :key="String(org.id)" :value="String(org.id)">{{ org.org_name }}</option></select></label>
         <label class="dialog-field"><span>组织名称*</span><input v-model="form.org_name" required></label>
-        <label class="dialog-field"><span>组织类型</span><input v-model="form.org_type" type="number"></label>
+        <label class="dialog-field"><span>组织类型</span><select v-model="form.org_type"><option v-for="item in orgTypeOptions" :key="String(item.value)" :value="item.value">{{ item.label }}</option></select></label>
         <label class="dialog-field"><span>负责人</span><input v-model="form.leader"></label>
         <label class="dialog-field"><span>联系电话</span><input v-model="form.phone"></label>
         <label class="dialog-field full"><span>地址</span><textarea v-model="form.address"></textarea></label>
       </div>
       <div v-else-if="formType === 'gateway'" class="dialog-fields">
-        <label class="dialog-field"><span>所属组织*</span><select v-model="form.org_id"><option v-for="org in orgOptions" :key="String(org.id)" :value="String(org.id)">{{ org.org_name }}</option></select></label>
+        <label class="dialog-field"><span>所属组织*</span><select v-model="form.org_id"><option value="">无</option><option v-for="org in orgOptions" :key="String(org.id)" :value="String(org.id)">{{ org.org_name }}</option></select></label>
         <label class="dialog-field"><span>网关编号*</span><input v-model="form.gateway_sn" required></label>
         <label class="dialog-field"><span>网关名称*</span><input v-model="form.gateway_name" required></label>
         <label class="dialog-field"><span>MQTT 密钥*</span><input v-model="form.mqtt_secret" required></label>
         <label class="dialog-field"><span>IP 地址</span><input v-model="form.ip_address"></label>
         <label class="dialog-field"><span>安装位置</span><input v-model="form.install_location"></label>
+        <label class="dialog-field"><span>启用状态</span><select v-model="form.status"><option v-for="item in statusOptions" :key="String(item.value)" :value="item.value">{{ item.label }}</option></select></label>
       </div>
       <div v-else class="dialog-fields">
-        <label class="dialog-field"><span>接入网关*</span><select v-model="form.gateway_id"><option v-for="gateway in gatewayOptions" :key="String(gateway.id)" :value="String(gateway.id)">{{ gateway.gateway_name || gateway.gateway_sn }}</option></select></label>
-        <label class="dialog-field"><span>所属组织*</span><select v-model="form.org_id"><option v-for="org in orgOptions" :key="String(org.id)" :value="String(org.id)">{{ org.org_name }}</option></select></label>
-        <label class="dialog-field"><span>设备类型*</span><select v-model="form.device_type_id"><option v-for="type in typeOptions" :key="String(type.id)" :value="String(type.id)">{{ type.type_name || type.type_code }}</option></select></label>
+        <label class="dialog-field"><span>接入网关*</span><select v-model="form.gateway_id"><option value="">无</option><option v-for="gateway in gatewayOptions" :key="String(gateway.id)" :value="String(gateway.id)">{{ gateway.gateway_name || gateway.gateway_sn }}</option></select></label>
+        <label class="dialog-field"><span>所属组织*</span><select v-model="form.org_id"><option value="">无</option><option v-for="org in orgOptions" :key="String(org.id)" :value="String(org.id)">{{ org.org_name }}</option></select></label>
+        <label class="dialog-field"><span>设备类型*</span><select v-model="form.device_type_id"><option value="">无</option><option v-for="type in typeOptions" :key="String(type.id)" :value="String(type.id)">{{ type.type_name || type.type_code }}</option></select></label>
         <label class="dialog-field"><span>设备编号*</span><input v-model="form.device_sn" required></label>
         <label class="dialog-field"><span>设备名称*</span><input v-model="form.device_name" required></label>
         <label class="dialog-field"><span>协议地址</span><input v-model="form.protocol_addr"></label>
         <label class="dialog-field"><span>安装位置</span><input v-model="form.install_location"></label>
         <label class="dialog-field"><span>设备型号</span><input v-model="form.device_model"></label>
+        <label class="dialog-field"><span>启用状态</span><select v-model="form.status"><option v-for="item in statusOptions" :key="String(item.value)" :value="item.value">{{ item.label }}</option></select></label>
       </div>
     </AppDialog>
 

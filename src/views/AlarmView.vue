@@ -65,6 +65,7 @@ const rule = reactive<AlarmRuleForm>({
 const dealDialog = ref(false)
 const dealTarget = ref<RecordRow | null>(null)
 const dealRemark = ref('')
+const orgOptions = ref<RecordRow[]>([])
 const deviceOptions = ref<RecordRow[]>([])
 const alarmTypeOptions = [
   { label: '过压', value: 1 },
@@ -145,7 +146,17 @@ async function load() {
   }
 }
 async function loadLookups() {
-  try { deviceOptions.value = (await listResource('archive', 'devices', { pageSize: 500 })).records } catch { deviceOptions.value = [] }
+  try {
+    const [orgs, devices] = await Promise.all([
+      listResource('archive', 'orgs', { pageSize: 500 }),
+      listResource('archive', 'devices', { pageSize: 500 }),
+    ])
+    orgOptions.value = orgs.records
+    deviceOptions.value = devices.records
+  } catch {
+    orgOptions.value = []
+    deviceOptions.value = []
+  }
 }
 
 function openCreate() { editingId.value = null; resetRule(); dialog.value = true }
@@ -175,7 +186,7 @@ onMounted(() => { load(); loadLookups() })
     </template>
 
     <AppDrawer :open="Boolean(selected)" title="告警详情" @update:open="(open) => { if (!open) selected = null }"><dl class="detail-grid"><template v-for="item in detailItems" :key="item[0]"><dt>{{ item[0] }}</dt><dd>{{ item[1] }}</dd></template></dl></AppDrawer>
-    <AppDialog v-model:open="dialog" :title="editingId ? '编辑告警规则' : '新增告警规则'" @submit="saveRule"><div class="dialog-fields"><label class="dialog-field"><span>规则名称*</span><input v-model="rule.rule_name" required></label><label class="dialog-field"><span>告警类型*</span><select v-model="rule.alarm_type"><option v-for="item in alarmTypeOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label class="dialog-field"><span>规则范围*</span><select v-model="rule.rule_scope"><option v-for="item in ruleScopeOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label class="dialog-field"><span>组织 ID</span><input v-model="rule.org_id" type="number"></label><label class="dialog-field"><span>设备 ID</span><input v-model="rule.device_id" type="number"></label><label class="dialog-field"><span>测点编码</span><input v-model="rule.point_code"></label><label class="dialog-field"><span>比较符</span><select v-model="rule.compare_operator"><option v-for="item in compareOperatorOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label class="dialog-field"><span>阈值</span><input v-model="rule.threshold_value" type="number"></label><label class="dialog-field"><span>区间下限</span><input v-model="rule.threshold_min" type="number"></label><label class="dialog-field"><span>区间上限</span><input v-model="rule.threshold_max" type="number"></label><label class="dialog-field"><span>告警等级</span><select v-model="rule.alarm_level"><option v-for="item in alarmLevelOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label class="dialog-field full"><span>备注</span><textarea v-model="rule.remark"></textarea></label></div></AppDialog>
+    <AppDialog v-model:open="dialog" :title="editingId ? '编辑告警规则' : '新增告警规则'" @submit="saveRule"><div class="dialog-fields"><label class="dialog-field"><span>规则名称*</span><input v-model="rule.rule_name" required></label><label class="dialog-field"><span>告警类型*</span><select v-model="rule.alarm_type"><option v-for="item in alarmTypeOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label class="dialog-field"><span>规则范围*</span><select v-model="rule.rule_scope"><option v-for="item in ruleScopeOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label class="dialog-field"><span>组织</span><select v-model="rule.org_id"><option value="">无</option><option v-for="org in orgOptions" :key="String(org.id)" :value="String(org.id)">{{ org.org_name }}</option></select></label><label class="dialog-field"><span>设备</span><select v-model="rule.device_id"><option value="">无</option><option v-for="device in deviceOptions" :key="String(device.id)" :value="String(device.id)">{{ device.device_name || device.device_sn }}</option></select></label><label class="dialog-field"><span>测点编码</span><input v-model="rule.point_code"></label><label class="dialog-field"><span>比较符</span><select v-model="rule.compare_operator"><option v-for="item in compareOperatorOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label class="dialog-field"><span>阈值</span><input v-model="rule.threshold_value" type="number"></label><label class="dialog-field"><span>区间下限</span><input v-model="rule.threshold_min" type="number"></label><label class="dialog-field"><span>区间上限</span><input v-model="rule.threshold_max" type="number"></label><label class="dialog-field"><span>告警等级</span><select v-model="rule.alarm_level"><option v-for="item in alarmLevelOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label class="dialog-field full"><span>备注</span><textarea v-model="rule.remark"></textarea></label></div></AppDialog>
     <AppDialog v-model:open="dealDialog" title="处置告警" confirm-text="确认处置" @submit="deal"><div class="dialog-fields"><label class="dialog-field full"><span>处置备注</span><textarea v-model="dealRemark" required></textarea></label></div></AppDialog>
   </section>
 </template>

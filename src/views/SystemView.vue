@@ -149,6 +149,12 @@ const permissionRows = computed(() => {
   rows.value.filter((item) => !out.some((row) => String(row.item.id) === String(item.id))).forEach((item) => out.push({ item, level: 0 }))
   return out
 })
+const permissionParentOptions = computed(() => [
+  { label: '无', value: 0 },
+  ...rows.value
+    .filter((item) => String(item.id) !== String(editingId.value ?? ''))
+    .map((item) => ({ label: `${String(item.permName || item.perm_name || '未命名权限')} · ${String(item.permCode || item.perm_code || item.id)}`, value: Number(item.id) })),
+])
 const permissionChildIds = computed(() => new Set(rows.value.map((item) => String(item.parentId ?? item.parent_id ?? 0)).filter((id) => id !== '0' && id !== 'null' && id !== 'undefined')))
 const visiblePermissionRows = computed(() => permissionRows.value.filter((entry) => entry.level === 0 || permissionAncestorsOpen(entry.item)))
 const pagedPermissionRows = computed(() => visiblePermissionRows.value.slice((pageNum.value - 1) * pageSize, pageNum.value * pageSize))
@@ -203,6 +209,21 @@ function permissionAncestorsOpen(item: RecordRow) {
 }
 function hasPermissionChildren(item: RecordRow) { return permissionChildIds.value.has(String(item.id)) }
 function canCreatePermissionChild(item: RecordRow) { return Number(item.permType ?? item.perm_type) !== 3 }
+function systemFieldOptions(field: string) {
+  if (mode.value === 'users' && field === 'orgId') return [{ label: '无', value: '' }, ...orgOptions.value.map((item) => ({ label: String(item.org_name || item.id), value: item.id }))]
+  if (mode.value === 'users' && field === 'status') return [{ label: '正常', value: 1 }, { label: '禁用', value: 0 }]
+  if (mode.value === 'roles' && field === 'dataScope') return [
+    { label: '全部数据', value: 1 },
+    { label: '本组织及下级', value: 2 },
+    { label: '本组织', value: 3 },
+    { label: '仅本人', value: 4 },
+  ]
+  if (mode.value === 'roles' && field === 'status') return [{ label: '启用', value: 1 }, { label: '停用', value: 0 }]
+  if (mode.value === 'permissions' && field === 'permType') return [{ label: '目录', value: 1 }, { label: '菜单', value: 2 }, { label: '按钮', value: 3 }]
+  if (mode.value === 'permissions' && field === 'parentId') return permissionParentOptions.value
+  if (mode.value === 'permissions' && field === 'status') return [{ label: '启用', value: 1 }, { label: '停用', value: 0 }]
+  return []
+}
 function togglePermissionNode(item: RecordRow) {
   const next = new Set(expandedPermissionIds.value)
   const id = String(item.id)
@@ -269,7 +290,7 @@ onBeforeUnmount(() => { if (keywordTimer) clearTimeout(keywordTimer) })
     <template v-if="mode === 'permissions'"><article class="archive-tree-panel permission-dict-tree"><div v-if="loading" class="empty-state">正在读取权限字典...</div><div v-else-if="!permissionRows.length" class="empty-state">暂无权限字典。</div><div v-for="entry in pagedPermissionRows" v-else :key="String(entry.item.id)" class="archive-tree-row permission-tree-row" :style="{ paddingLeft: `${10 + entry.level * 24}px` }"><button class="tree-toggle" :class="{ placeholder: !hasPermissionChildren(entry.item) }" :disabled="!hasPermissionChildren(entry.item)" :title="expandedPermissionIds.has(String(entry.item.id)) ? '收起' : '展开'" @click="togglePermissionNode(entry.item)"><ChevronDown v-if="expandedPermissionIds.has(String(entry.item.id))" :size="15" /><ChevronRight v-else :size="15" /></button><span class="tag" :class="Number(entry.item.permType ?? entry.item.perm_type) === 3 ? 'blue' : Number(entry.item.permType ?? entry.item.perm_type) === 2 ? 'warn' : 'success'">{{ Number(entry.item.permType ?? entry.item.perm_type) === 3 ? '按钮' : Number(entry.item.permType ?? entry.item.perm_type) === 2 ? '菜单' : '目录' }}</span><div class="tree-main"><b>{{ entry.item.permName || entry.item.perm_name }}</b><small>{{ entry.item.permCode || entry.item.perm_code }} / parent: {{ entry.item.parentId ?? entry.item.parent_id ?? 0 }}</small></div><div class="row-actions"><button class="icon-btn" title="详情" aria-label="详情" @click="selected = entry.item"><Eye :size="16" /></button><button v-if="canAdd && canCreatePermissionChild(entry.item)" class="icon-btn" title="新增子项目" aria-label="新增子项目" @click="openCreate(entry.item)"><Plus :size="16" /></button><button v-if="canEdit" class="icon-btn" title="编辑" aria-label="编辑" @click="openEdit(entry.item)"><Pencil :size="16" /></button><button v-if="canDelete" class="icon-btn danger-text" title="删除" aria-label="删除" @click="openDelete(entry.item)"><Trash2 :size="16" /></button></div></div></article><div v-if="displayTotal > 0" class="table-pagination system-tree-pagination"><span>共 {{ displayTotal }} 条</span><button class="quiet" :disabled="pageNum <= 1" @click="previousPage">上一页</button><b>{{ pageNum }} / {{ pageCount }}</b><button class="quiet" :disabled="pageNum >= pageCount" @click="nextPage">下一页</button></div></template>
     <AppDataTable v-else :pageable="true" :page-size="pageSize" :current-page="pageNum" :total="total" :hide-actions="mode === 'audit'" :columns="mode === 'audit' ? auditColumns : mode === 'profile' ? profileColumns : systemColumns" :rows="mode === 'audit' ? auditRows : rows" :loading="loading" :error="error" @refresh="load" @page-change="changePage"><template #actions="{ row }"><button v-if="canEdit" class="icon-btn" title="编辑" aria-label="编辑" @click="openEdit(row)"><Pencil :size="16" /></button><button v-if="mode === 'users' && session.can('system:user:edit')" class="icon-btn" title="分配角色" aria-label="分配角色" @click="openRelation(row, 'roles')"><UserRoundCog :size="16" /></button><button v-if="mode === 'users' && session.can('system:user:edit')" class="icon-btn" title="重置密码" aria-label="重置密码" @click="openRelation(row, 'password')"><KeyRound :size="16" /></button><button v-if="mode === 'users' && session.can('system:user:scope:edit')" class="icon-btn" title="组织范围" aria-label="组织范围" @click="openRelation(row, 'scopes')"><GitBranch :size="16" /></button><button v-if="mode === 'roles' && session.can('system:role:edit')" class="icon-btn" title="分配权限" aria-label="分配权限" @click="openRelation(row, 'permissions')"><ShieldCheck :size="16" /></button><button v-if="canDelete" class="icon-btn danger-text" title="删除" aria-label="删除" @click="openDelete(row)"><Trash2 :size="16" /></button></template></AppDataTable>
     <AppDialog :open="Boolean(selected)" title="系统记录详情" eyebrow="DETAIL" hide-actions @update:open="(open) => { if (!open) selected = null }"><dl class="detail-grid dialog-detail-grid"><template v-for="item in selectedDetailItems" :key="item[0]"><dt>{{ item[0] }}</dt><dd>{{ item[1] }}</dd></template></dl></AppDialog>
-    <AppDialog v-model:open="dialog" :title="editingId ? `编辑${title}` : `新增${title}`" @submit="save"><div class="dialog-fields"><label v-for="field in configuration?.fields || []" :key="field" class="dialog-field" :class="{ full: ['remark'].includes(field) }"><span>{{ fieldLabel(field) }}</span><textarea v-if="field === 'remark'" v-model="form[field]"></textarea><select v-else-if="field === 'permType'" v-model="form[field]"><option :value="1">目录</option><option :value="2">菜单</option><option :value="3">按钮</option></select><input v-else v-model="form[field]" :type="inputType(field)"></label></div></AppDialog>
+    <AppDialog v-model:open="dialog" :title="editingId ? `编辑${title}` : `新增${title}`" @submit="save"><div class="dialog-fields"><label v-for="field in configuration?.fields || []" :key="field" class="dialog-field" :class="{ full: ['remark'].includes(field) }"><span>{{ fieldLabel(field) }}</span><textarea v-if="field === 'remark'" v-model="form[field]"></textarea><select v-else-if="systemFieldOptions(field).length" v-model="form[field]"><option v-for="option in systemFieldOptions(field)" :key="String(option.value)" :value="option.value">{{ option.label }}</option></select><input v-else v-model="form[field]" :type="inputType(field)"></label></div></AppDialog>
     <AppDialog v-model:open="relationDialog" :title="relationTitle" @submit="saveRelation"><div class="dialog-fields"><label class="dialog-field full"><span>{{ relationMode === 'password' ? '新密码' : relationMode === 'scopes' ? '组织范围' : 'ID 集合' }}</span><textarea v-if="relationMode === 'scopes'" v-model="relationText" spellcheck="false"></textarea><input v-else v-model="relationText" :type="relationMode === 'password' ? 'password' : 'text'" :placeholder="relationMode === 'password' ? '请输入新密码' : '例如 1,2,3'"></label></div></AppDialog>
     <AppConfirmDialog v-model:open="deleteDialog" :title="`删除${title}`" message="确认删除后将立即调用后端删除接口，且无法恢复。" :loading="deleting" confirm-text="确认删除" @confirm="confirmDelete" />
   </section>
