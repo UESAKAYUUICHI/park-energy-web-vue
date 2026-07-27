@@ -6,7 +6,7 @@ import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/compon
 import { graphic, init, use, type ECharts, type EChartsCoreOption } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { Activity, Archive, BadgeCheck, BarChart3, Bell, Building2, Cable, ChartNoAxesCombined, CircleDollarSign, ClipboardCheck, Compass, Cpu, Crosshair, FileClock, FileText, Gauge, GitFork, HardHat, History, KeyRound, ListOrdered, Network, RadioReceiver, ReceiptText, Router, ScrollText, Send, Settings2, ShieldCheck, Siren, SlidersHorizontal, Tags, UserCircle, Users, WalletCards, Wrench, Zap } from '@lucide/vue'
-import { cockpit, dashboard } from '@/api/platform'
+import { cockpit, dashboard, rootOrgs } from '@/api/platform'
 import { routeRecords } from '@/router/routes'
 import { useSessionStore } from '@/stores/session'
 import type { RecordRow } from '@/types/domain'
@@ -36,6 +36,8 @@ interface QuickGroup {
 }
 
 const session = useSessionStore()
+const rootOrgOptions = ref<RecordRow[]>([])
+const selectedRootOrgId = ref('')
 const workspace = ref<RecordRow>({})
 const summary = ref<RecordRow>({})
 const loading = ref(false)
@@ -45,7 +47,7 @@ let powerChart: ECharts | null = null
 
 const metrics = computed(() => (workspace.value.metrics || summary.value.metrics || {}) as RecordRow)
 const trend = computed(() => ((workspace.value.energyTrend || summary.value.energyTrend || []) as RecordRow[]).slice(-16))
-const currentEnterprise = computed(() => String(session.orgScopes?.[0]?.org_name || session.user?.org_name || '智园园区'))
+const enterpriseLocked = computed(() => rootOrgOptions.value.length <= 1)
 
 const topCards = computed(() => [
   { title: '上网电量', dayLabel: '日上网电量', day: '-- kW·h', total: formatEnergy(metrics.value.exportEnergy ?? 0), tone: 'pink', note: '累计上网电量' },
@@ -135,7 +137,12 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [cockpitData, summaryData] = await Promise.all([cockpit(), dashboard()])
+    const roots = await rootOrgs()
+    rootOrgOptions.value = roots as RecordRow[]
+    const selected = rootOrgOptions.value.find((item) => String(item.id) === String(selectedRootOrgId.value)) || rootOrgOptions.value[0]
+    selectedRootOrgId.value = selected ? String(selected.id) : ''
+    const params = selectedRootOrgId.value ? { rootOrgId: selectedRootOrgId.value } : {}
+    const [cockpitData, summaryData] = await Promise.all([cockpit(params), dashboard(params)])
     workspace.value = cockpitData
     summary.value = summaryData
   } catch (e) {
@@ -231,7 +238,9 @@ onBeforeUnmount(() => {
     <header class="microgrid-filter">
       <label>
         <span>企业</span>
-        <input :value="currentEnterprise" readonly>
+        <select v-model="selectedRootOrgId" :disabled="enterpriseLocked" :class="{ 'is-locked': enterpriseLocked }" @change="load">
+          <option v-for="org in rootOrgOptions" :key="String(org.id)" :value="String(org.id)">{{ org.org_name }}</option>
+        </select>
       </label>
       <button class="quiet" :disabled="loading" @click="load">刷新</button>
     </header>
@@ -305,3 +314,22 @@ onBeforeUnmount(() => {
     </template>
   </section>
 </template>
+
+<style scoped>
+.microgrid-filter select {
+  min-width: 180px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border, #dfe4ec);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text, #1c2430);
+  outline: none;
+}
+
+.microgrid-filter select.is-locked:disabled {
+  background: #eef2f7;
+  color: #7a8698;
+  cursor: not-allowed;
+}
+</style>
