@@ -17,6 +17,8 @@ const title = computed(() => mode.value === 'settlement' ? '结算工作台' : '
 const rows = ref<RecordRow[]>([])
 const keyword = ref('')
 const accountId = ref('')
+const orgId = ref('')
+const includeChildren = ref('')
 const payStatus = ref('')
 const billCycle = ref('')
 const accountOptions = ref<RecordRow[]>([])
@@ -27,10 +29,18 @@ const preview = ref<RecordRow | null>(null)
 const previewDialog = ref(false)
 const paymentDialog = ref(false)
 const calculating = ref(false)
-const payment = reactive<RecordRow>({ payAmount: '', payWay: '转账', remark: '' })
-const settlement = reactive<RecordRow>({ accountId: '', startDate: '', endDate: '', billCycle: '' })
+const payment = reactive<{ payAmount: string | number; payWay: string; remark: string }>({ payAmount: '', payWay: '转账', remark: '' })
+const settlement = reactive<{ accountId: string; startDate: string; endDate: string; billCycle: string }>({ accountId: '', startDate: '', endDate: '', billCycle: '' })
 
-const previewDetails = computed(() => Array.isArray(preview.value?.details) ? preview.value.details as RecordRow[] : [])
+const queryText = (value: unknown) => Array.isArray(value) ? String(value[0] ?? '') : String(value ?? '')
+const syncQueryFilters = () => {
+  accountId.value = queryText(route.query.accountId)
+  orgId.value = queryText(route.query.orgId)
+  includeChildren.value = queryText(route.query.includeChildren)
+  payStatus.value = queryText(route.query.payStatus)
+  billCycle.value = queryText(route.query.billCycle)
+}
+const previewDetails = computed(() => Array.isArray(preview.value?.details) ? preview.value.details as unknown as RecordRow[] : [])
 const detailColumns = [{ key: 'device_name', label: '计费设备' }, { key: 'device_type_name', label: '设备类型' }, { key: 'point_code', label: '计费测点' }, { key: 'start_value', label: '起始值' }, { key: 'end_value', label: '结束值' }, { key: 'usage_value', label: '用量' }, { key: 'unit_price', label: '单价' }, { key: 'amount', label: '金额' }]
 const billColumns = [{ key: 'bill_no', label: '账单编号' }, { key: 'account_name', label: '计费账户' }, { key: 'bill_cycle', label: '账期' }, { key: 'start_date', label: '开始日期' }, { key: 'end_date', label: '结束日期' }, { key: 'total_amount', label: '应收金额', format: (value: unknown) => `¥ ${Number(value || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}` }, { key: 'pay_status', label: '状态' }]
 const accountColumns = [{ key: 'account_name', label: '可见计费账户' }, { key: 'org_id', label: '组织 ID' }, { key: 'contact_name', label: '联系人' }, { key: 'status', label: '状态' }]
@@ -46,7 +56,7 @@ async function load() {
       return
     }
     const [data, accounts] = await Promise.all([
-      bills({ pageNum: 1, pageSize: 200, keyword: keyword.value, accountId: accountId.value || undefined, payStatus: payStatus.value || undefined, billCycle: billCycle.value || undefined }),
+      bills({ pageNum: 1, pageSize: 200, keyword: keyword.value, accountId: accountId.value || undefined, orgId: orgId.value || undefined, includeChildren: includeChildren.value || undefined, payStatus: payStatus.value || undefined, billCycle: billCycle.value || undefined }),
       listResource('billing', 'accounts', { pageSize: 200 }),
     ])
     rows.value = data.records
@@ -94,7 +104,7 @@ async function createBill() {
 
 function openPayment() {
   if (!selected.value) return
-  payment.payAmount = selected.value.total_amount ?? ''
+  payment.payAmount = String(selected.value.total_amount ?? '')
   payment.payWay = '转账'
   payment.remark = ''
   paymentDialog.value = true
@@ -120,13 +130,15 @@ async function operate(action: 'recalculate' | 'void') {
 function reset() {
   keyword.value = ''
   accountId.value = ''
+  orgId.value = ''
+  includeChildren.value = ''
   payStatus.value = ''
   billCycle.value = ''
   load()
 }
 
-watch(() => route.fullPath, load)
-onMounted(load)
+watch(() => route.fullPath, () => { syncQueryFilters(); void load() })
+onMounted(() => { syncQueryFilters(); void load() })
 </script>
 
 <template>

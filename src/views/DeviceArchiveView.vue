@@ -29,6 +29,12 @@ interface FlatNode {
   level: number
 }
 
+interface ArchiveAction {
+  label: string
+  path: string
+  query: Record<string, string>
+}
+
 interface ArchiveForm extends Record<string, unknown> {
   parent_id: string | number
   org_name: string
@@ -66,6 +72,7 @@ function daysAgo(days: number) {
   date.setDate(date.getDate() - days)
   return formatDateInput(date)
 }
+const archiveLink = (label: string, path: string, query: Record<string, string>): ArchiveAction => ({ label, path, query })
 
 const route = useRoute()
 const router = useRouter()
@@ -264,6 +271,55 @@ const overviewCards = computed(() => {
     [selectedIsGateway.value ? '启用设备' : '在线网关', selectedIsGateway.value ? profile.value.onlineDeviceCount ?? '—' : profile.value.onlineGatewayCount ?? '—'],
     ['近期告警', recentAlarms.value.length],
     ['能耗记录', energyTrend.value.length],
+  ]
+})
+const archiveSummaryCards = computed(() => {
+  const summary = (profile.value.summary || {}) as RecordRow
+  if (selectedIsDevice.value) return [
+    ['测点数量', summary.pointCount ?? pointDefinitions.value.length],
+    ['历史记录', summary.historyCount ?? recentHistory.value.length],
+    ['近期告警', summary.alarmCount ?? recentAlarms.value.length],
+    ['指令记录', summary.commandCount ?? inspectionRecords.value.length],
+  ]
+  if (selectedIsGateway.value) return [
+    ['设备总数', summary.deviceCount ?? profile.value.deviceCount ?? '—'],
+    ['在线设备', summary.onlineDeviceCount ?? profile.value.onlineDeviceCount ?? '—'],
+    ['近期告警', summary.alarmCount ?? recentAlarms.value.length],
+    ['实时快照', summary.realtimeSnapshotCount ?? realtimeSnapshots.value.length],
+  ]
+  return [
+    ['设备总数', summary.deviceCount ?? profile.value.deviceCount ?? '—'],
+    ['网关总数', summary.gatewayCount ?? profile.value.gatewayCount ?? '—'],
+    ['在线网关', summary.onlineGatewayCount ?? profile.value.onlineGatewayCount ?? '—'],
+    ['近期告警', summary.alarmCount ?? recentAlarms.value.length],
+  ]
+})
+const defaultPointCodes = computed(() => {
+  const codes = pointDefinitions.value
+    .map((point) => String(point.point_code || point.pointCode || point.code || ''))
+    .filter(Boolean)
+    .slice(0, 3)
+  return codes.length ? codes.join(',') : 'total_active_energy'
+})
+const archiveActionLinks = computed<ArchiveAction[]>(() => {
+  if (!selectedNode.value) return []
+  const id = String(selectedNode.value.id)
+  if (selectedIsDevice.value) return [
+    archiveLink('实时监控', '/monitor/realtime', { deviceId: id }),
+    archiveLink('历史分析', '/analysis/history', { deviceId: id, pointCodes: defaultPointCodes.value, startTime: historyStart.value, endTime: historyEnd.value }),
+    archiveLink('告警中心', '/alarms/events', { deviceId: id }),
+    archiveLink('指令追踪', '/access/commands', { targetId: id }),
+    archiveLink('设备控制', '/access/control', { targetId: id }),
+  ]
+  if (selectedIsGateway.value) return [
+    archiveLink('接入诊断', '/access/diagnostic', { gatewayId: id }),
+    archiveLink('指令追踪', '/access/commands', { gatewayId: id }),
+    archiveLink('告警中心', '/alarms/events', { gatewayId: id }),
+  ]
+  return [
+    archiveLink('告警中心', '/alarms/events', { orgId: id, includeChildren: 'true' }),
+    archiveLink('告警处置', '/alarms/workbench', { orgId: id, includeChildren: 'true' }),
+    archiveLink('账单中心', '/billing/bills', { orgId: id, includeChildren: 'true' }),
   ]
 })
 const viewToggleLabel = computed(() => dataView.value === 'chart' ? '图表' : '表格')
@@ -936,6 +992,15 @@ onBeforeUnmount(() => {
           <div v-if="!selectedNode" class="archive-main-empty">请选择左侧档案节点。</div>
 
           <template v-else>
+          <div class="archive-brief-strip">
+            <article v-for="item in archiveSummaryCards" :key="String(item[0])" class="archive-brief-card">
+              <span>{{ item[0] }}</span>
+              <b>{{ displayValue(item[1]) }}</b>
+            </article>
+          </div>
+          <div class="archive-link-strip">
+            <button v-for="link in archiveActionLinks" :key="link.path + link.label" class="quiet" @click="router.push({ path: link.path, query: link.query })">{{ link.label }}</button>
+          </div>
           <div v-if="selectedIsDevice" class="archive-tabs">
             <button :class="{ active: activeArchiveTab === 'device' }" @click="activeArchiveTab = 'device'">设备信息</button>
             <button :class="{ active: activeArchiveTab === 'inspection' }" @click="activeArchiveTab = 'inspection'">指令记录</button>

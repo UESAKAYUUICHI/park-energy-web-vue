@@ -39,6 +39,10 @@ const keyword = ref('')
 const dealStatus = ref(mode.value === 'alarm-workbench' ? '0' : '')
 const alarmType = ref('')
 const alarmLevel = ref('')
+const deviceId = ref('')
+const gatewayId = ref('')
+const orgId = ref('')
+const includeChildren = ref('')
 const startTime = ref('')
 const endTime = ref('')
 const loading = ref(false)
@@ -116,6 +120,13 @@ const summaryCards = computed(() => [{ label: '待处理告警', value: summary.
 const detailItems = computed(() => selected.value ? [
   ['所属组织', selected.value.org_name || selected.value.org_id || '—'], ['告警设备', selected.value.device_name || selected.value.device_sn || '—'], ['触发测点', selected.value.point_code || '—'], ['告警类型', alarmTypeLabel(selected.value.alarm_type)], ['告警等级', alarmLevelLabel(selected.value.alarm_level)], ['触发值', selected.value.alarm_value ?? '—'], ['阈值', selected.value.threshold_value ?? '—'], ['告警时间', selected.value.alarm_time || '—'], ['处理状态', Number(selected.value.deal_status) === 1 ? '已处理' : '未处理'], ['处理人', selected.value.deal_user || '—'], ['处理时间', selected.value.deal_time || '—'], ['处置备注', selected.value.deal_remark || '—'],
 ] : [])
+const queryText = (value: unknown) => Array.isArray(value) ? String(value[0] ?? '') : String(value ?? '')
+function syncQueryFilters() {
+  deviceId.value = queryText(route.query.deviceId)
+  gatewayId.value = queryText(route.query.gatewayId)
+  orgId.value = queryText(route.query.orgId)
+  includeChildren.value = queryText(route.query.includeChildren)
+}
 
 function resetRule(data: RecordRow = {}) {
   Object.keys(rule).forEach((key) => delete rule[key])
@@ -133,8 +144,8 @@ async function load() {
       return
     }
     const [page, data] = await Promise.all([
-      alarmEvents({ pageNum: 1, pageSize: 200, keyword: keyword.value, dealStatus: dealStatus.value || undefined, startTime: startTime.value || undefined, endTime: endTime.value || undefined }),
-      alarmSummary({ dealStatus: dealStatus.value || undefined }),
+      alarmEvents({ pageNum: 1, pageSize: 200, keyword: keyword.value, deviceId: deviceId.value || undefined, gatewayId: gatewayId.value || undefined, orgId: orgId.value || undefined, includeChildren: includeChildren.value || undefined, dealStatus: dealStatus.value || undefined, startTime: startTime.value || undefined, endTime: endTime.value || undefined }),
+      alarmSummary({ orgId: orgId.value || undefined, includeChildren: includeChildren.value || undefined, dealStatus: dealStatus.value || undefined }),
     ])
     rows.value = page.records.filter((row) => (!alarmType.value || String(row.alarm_type) === alarmType.value) && (!alarmLevel.value || String(row.alarm_level) === alarmLevel.value))
     summary.value = data
@@ -164,10 +175,10 @@ function openEdit(row: RecordRow) { editingId.value = row.id; resetRule(row); di
 async function saveRule() { try { await saveAlarmRule(rule, editingId.value || undefined); dialog.value = false; await load() } catch (e) { error.value = e instanceof Error ? e.message : '规则保存失败' } }
 function openDeal(row: RecordRow) { dealTarget.value = row; dealRemark.value = ''; dealDialog.value = true }
 async function deal() { if (!dealTarget.value) return; try { await dealAlarm(dealTarget.value.id, { dealUser: session.user?.username || 'admin', dealRemark: dealRemark.value }); dealDialog.value = false; await load() } catch (e) { error.value = e instanceof Error ? e.message : '告警处置失败' } }
-function resetEvents() { keyword.value = ''; dealStatus.value = mode.value === 'alarm-workbench' ? '0' : ''; alarmType.value = ''; alarmLevel.value = ''; startTime.value = ''; endTime.value = ''; load() }
+function resetEvents() { keyword.value = ''; dealStatus.value = mode.value === 'alarm-workbench' ? '0' : ''; alarmType.value = ''; alarmLevel.value = ''; deviceId.value = ''; gatewayId.value = ''; orgId.value = ''; includeChildren.value = ''; startTime.value = ''; endTime.value = ''; load() }
 
-watch(() => route.fullPath, () => { dealStatus.value = mode.value === 'alarm-workbench' ? '0' : ''; load(); loadLookups() })
-onMounted(() => { load(); loadLookups() })
+watch(() => route.fullPath, () => { dealStatus.value = mode.value === 'alarm-workbench' ? '0' : ''; syncQueryFilters(); load(); loadLookups() })
+onMounted(() => { syncQueryFilters(); load(); loadLookups() })
 </script>
 
 <template>
