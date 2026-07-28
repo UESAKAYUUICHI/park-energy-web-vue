@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useAlertRef } from '@/composables/useAppAlert'
 import { useRoute } from 'vue-router'
 import AppDataTable from '@/components/app/AppDataTable.vue'
 import AppDialog from '@/components/app/AppDialog.vue'
@@ -10,7 +11,23 @@ import { access, sendCommand } from '@/api/platform'
 import { unwrapRemote } from '@/api/http'
 import type { RecordRow } from '@/types/domain'
 
-const route = useRoute(); const mode = computed(() => String(route.meta.kind)); const title = computed(() => String(route.meta.title)); const rows = ref<RecordRow[]>([]); const payload = ref<RecordRow>({}); const keyword = ref(''); const gatewayId = ref(''); const targetId = ref(''); const commandStatus = ref(''); const onlineStatus = ref(''); const loading = ref(false); const error = ref(''); const selected = ref<RecordRow | null>(null); const dialog = ref(false); const timer = ref<number | null>(null); const command = reactive<{ targetId: string; commandType: string; commandPayloadText: string }>({ targetId: '', commandType: '', commandPayloadText: '{}' })
+const route = useRoute()
+const mode = computed(() => String(route.meta.kind))
+const title = computed(() => String(route.meta.title))
+const rows = ref<RecordRow[]>([])
+const payload = ref<RecordRow>({})
+const keyword = ref('')
+const gatewayId = ref('')
+const targetId = ref('')
+const commandStatus = ref('')
+const onlineStatus = ref('')
+const loading = ref(false)
+const error = useAlertRef()
+const selected = ref<RecordRow | null>(null)
+const dialog = ref(false)
+const timer = ref<number | null>(null)
+const command = reactive<{ targetId: string; commandType: string; commandPayloadText: string }>({ targetId: '', commandType: '', commandPayloadText: '{}' })
+
 const columns = computed(() => mode.value === 'access' ? [{ key: 'gatewaySn', label: '网关编号' }, { key: 'topicGatewayId', label: '接入标识' }, { key: 'status', label: '在线状态' }, { key: 'lastSeenTime', label: '最后在线' }] : [{ key: 'target_sn', label: '目标编号' }, { key: 'command_type', label: '指令类型' }, { key: 'request_username', label: '发起人' }, { key: 'request_time', label: '发起时间' }, { key: 'response_time', label: '响应时间' }, { key: 'status', label: '执行状态' }, { key: 'fail_reason', label: '失败原因' }])
 const queryText = (value: unknown) => Array.isArray(value) ? String(value[0] ?? '') : String(value ?? '')
 const syncQueryFilters = () => { gatewayId.value = queryText(route.query.gatewayId); targetId.value = queryText(route.query.targetId || route.query.deviceId) }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, nextTick, ref } from 'vue'
+import { onMounted, nextTick, ref } from 'vue'
+import { useAlertRef } from '@/composables/useAppAlert'
 import { Lock, QrCode, Smartphone, UserRound } from '@lucide/vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
@@ -12,13 +13,12 @@ const consentChecked = ref(false)
 const agreementOpen = ref(false)
 const agreementScrolledToBottom = ref(false)
 const pendingSubmit = ref(false)
-const error = ref('')
+const error = useAlertRef()
 const pending = ref(false)
 const agreementBody = ref<HTMLElement | null>(null)
 const router = useRouter()
 const route = useRoute()
 const session = useSessionStore()
-const unavailable = computed(() => error.value.includes('服务不可用') || error.value.includes('服务暂不可用') || error.value.includes('无法连接'))
 
 function randomCaptcha() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
@@ -114,7 +114,6 @@ onMounted(randomCaptcha)
           <span><UserRound :size="18" />账号/手机号/邮箱</span>
           <input v-model.trim="username" autocomplete="username" required>
         </label>
-        <p v-if="error" class="form-error"><b>{{ unavailable ? '服务不可用：' : '登录失败：' }}</b>{{ error }}</p>
         <label class="login-field">
           <span><Lock :size="18" />密码</span>
           <input v-model="password" type="password" autocomplete="current-password" required>

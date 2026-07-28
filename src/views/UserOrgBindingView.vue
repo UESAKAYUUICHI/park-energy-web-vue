@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { showAppAlert, useAlertRef } from '@/composables/useAppAlert'
 import FilterBar from '@/components/app/FilterBar.vue'
 import { assignUserOrgScopes, rbacOrgTree, rbacPage, userOrgScopes } from '@/api/platform'
 import type { RecordRow } from '@/types/domain'
@@ -15,8 +16,8 @@ const selectedUserId = ref<unknown>(null)
 const selectedOrgModes = ref<Record<string, ScopeMode>>({})
 const keyword = ref('')
 const loading = ref(false)
+const error = useAlertRef()
 const saving = ref(false)
-const error = ref('')
 const notice = ref('')
 
 const canEdit = computed(() => session.can('system:user:scope:edit'))
@@ -82,6 +83,7 @@ async function saveScopes() {
     const scopes = Object.entries(selectedOrgModes.value).map(([orgId, scopeMode]) => ({ orgId: Number(orgId), scopeMode }))
     await assignUserOrgScopes(selectedUserId.value, scopes)
     notice.value = '用户组织绑定已保存'
+    showAppAlert({ title: '操作成功', message: notice.value, type: 'success' })
   } catch (e) {
     error.value = e instanceof Error ? e.message : '用户组织绑定保存失败'
   } finally {
@@ -115,8 +117,6 @@ onMounted(load)
       <div><p class="eyebrow">USER ORG SCOPE</p><h1>用户组织绑定</h1><p>组织范围授权。</p></div>
       <button class="quiet" @click="load">刷新</button>
     </header>
-    <div v-if="error" class="notice">{{ error }}</div>
-    <div v-else-if="notice" class="notice success-notice">{{ notice }}</div>
     <div class="org-binding-board">
       <article class="panel rbac-column">
         <div class="panel-head"><div><h3>用户列表</h3><small>{{ selectedUser ? userLabel(selectedUser) : '请选择用户' }}</small></div></div>

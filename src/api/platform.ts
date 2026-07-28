@@ -15,6 +15,7 @@ export const deviceArchiveProfile = (id: unknown) => request<RecordRow>(`/archiv
 export const orgArchiveProfile = (id: unknown) => request<RecordRow>(`/archive/orgs/${id}/archive-profile`)
 export const gatewayArchiveProfile = (id: unknown) => request<RecordRow>(`/archive/gateways/${id}/archive-profile`)
 export const copyResource = (area: 'archive' | 'billing', resource: string, id: unknown) => request<RecordRow>(`/${area}/${resource}/${id}/copy`, { method: 'POST' })
+export const bindDevicesToGateway = (gatewayId: unknown, ids: unknown[]) => request<RecordRow[]>(`/archive/gateways/${gatewayId}/bind-devices`, { method: 'POST', ...json({ ids }) })
 export const deviceTypePoints = (id: unknown) => request<RecordRow>(`/archive/device-types/${id}/points`)
 export const saveDeviceTypePoints = (id: unknown, body: RecordRow) => request<RecordRow>(`/archive/device-types/${id}/points/batch`, { method: 'POST', ...json(body) })
 export const parsePoints = (body: RecordRow) => request<RecordRow>('/archive/point-mappings/parse-test', { method: 'POST', ...json(body) })

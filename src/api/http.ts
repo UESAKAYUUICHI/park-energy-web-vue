@@ -4,11 +4,14 @@ const baseUrl = import.meta.env.VITE_PLATFORM_BASE_URL || '/api/platform'
 const tokenKey = 'park-energy-token'
 const tokenNameKey = 'park-energy-token-name'
 const tokenPrefixKey = 'park-energy-token-prefix'
-export const getToken = () => sessionStorage.getItem(tokenKey)
-export const getTokenName = () => sessionStorage.getItem(tokenNameKey) || 'Authorization'
-export const getTokenPrefix = () => sessionStorage.getItem(tokenPrefixKey) || 'Bearer'
-export const setToken = (value: string, name = 'Authorization', prefix = 'Bearer') => { sessionStorage.setItem(tokenKey, value); sessionStorage.setItem(tokenNameKey, name); sessionStorage.setItem(tokenPrefixKey, prefix) }
-export const clearToken = () => { sessionStorage.removeItem(tokenKey); sessionStorage.removeItem(tokenNameKey); sessionStorage.removeItem(tokenPrefixKey) }
+const readStored = (key: string) => sessionStorage.getItem(key) || localStorage.getItem(key)
+const writeStored = (key: string, value: string) => { sessionStorage.setItem(key, value); localStorage.setItem(key, value) }
+const removeStored = (key: string) => { sessionStorage.removeItem(key); localStorage.removeItem(key) }
+export const getToken = () => readStored(tokenKey)
+export const getTokenName = () => readStored(tokenNameKey) || 'Authorization'
+export const getTokenPrefix = () => readStored(tokenPrefixKey) || 'Bearer'
+export const setToken = (value: string, name = 'Authorization', prefix = 'Bearer') => { writeStored(tokenKey, value); writeStored(tokenNameKey, name); writeStored(tokenPrefixKey, prefix) }
+export const clearToken = () => { removeStored(tokenKey); removeStored(tokenNameKey); removeStored(tokenPrefixKey) }
 
 export function toQuery(params: Record<string, unknown> = {}) {
   const query = new URLSearchParams()

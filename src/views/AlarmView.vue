@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useAlertRef } from '@/composables/useAppAlert'
+import { useRoute, useRouter } from 'vue-router'
 import AppDataTable, { type TableColumn } from '@/components/app/AppDataTable.vue'
 import AppDialog from '@/components/app/AppDialog.vue'
 import AppDrawer from '@/components/app/AppDrawer.vue'
 import FilterBar from '@/components/app/FilterBar.vue'
 import StatusTag from '@/components/app/StatusTag.vue'
-import { CheckCircle2, Eye, Pencil, RefreshCw } from '@lucide/vue'
+import { Activity, CheckCircle2, Cpu, Eye, Pencil, RefreshCw } from '@lucide/vue'
 import { alarmEvents, alarmRules, alarmSummary, dealAlarm, listResource, saveAlarmRule } from '@/api/platform'
 import type { RecordRow } from '@/types/domain'
 import { useSessionStore } from '@/stores/session'
@@ -30,6 +31,7 @@ interface AlarmRuleForm extends Record<string, string | number | unknown> {
 }
 
 const route = useRoute()
+const router = useRouter()
 const session = useSessionStore()
 const mode = computed(() => String(route.meta.kind))
 const title = computed(() => String(route.meta.title))
@@ -46,7 +48,7 @@ const includeChildren = ref('')
 const startTime = ref('')
 const endTime = ref('')
 const loading = ref(false)
-const error = ref('')
+const error = useAlertRef()
 const selected = ref<RecordRow | null>(null)
 const dialog = ref(false)
 const editingId = ref<unknown>(null)
@@ -116,7 +118,13 @@ const fullRuleColumns = computed<TableColumn[]>(() => {
   rows.value.forEach((row) => Object.keys(row).forEach((key) => keys.add(key)))
   return [...keys].map((key) => ({ key, label: key === 'device_id' ? '告警设备' : fieldLabel(key, labels.get(key)), format: key === 'device_id' ? deviceName : formats.get(key) }))
 })
-const summaryCards = computed(() => [{ label: '待处理告警', value: summary.value.pendingCount || 0, tone: 'warn' }, { label: '已处理告警', value: summary.value.handledCount || 0, tone: 'success' }, { label: '当前列表', value: rows.value.length, tone: 'blue' }])
+const urgentCount = computed(() => rows.value.filter((row) => Number(row.alarm_level) === 3 && Number(row.deal_status) === 0).length)
+const summaryCards = computed(() => [
+  { label: '待处理告警', value: summary.value.pendingCount || 0, tone: 'warn', hint: '处置队列' },
+  { label: '紧急未处理', value: urgentCount.value, tone: 'danger', hint: '优先处理' },
+  { label: '已处理告警', value: summary.value.handledCount || 0, tone: 'success', hint: '闭环完成' },
+  { label: '当前列表', value: rows.value.length, tone: 'blue', hint: '筛选结果' },
+])
 const detailItems = computed(() => selected.value ? [
   ['所属组织', selected.value.org_name || selected.value.org_id || '—'], ['告警设备', selected.value.device_name || selected.value.device_sn || '—'], ['触发测点', selected.value.point_code || '—'], ['告警类型', alarmTypeLabel(selected.value.alarm_type)], ['告警等级', alarmLevelLabel(selected.value.alarm_level)], ['触发值', selected.value.alarm_value ?? '—'], ['阈值', selected.value.threshold_value ?? '—'], ['告警时间', selected.value.alarm_time || '—'], ['处理状态', Number(selected.value.deal_status) === 1 ? '已处理' : '未处理'], ['处理人', selected.value.deal_user || '—'], ['处理时间', selected.value.deal_time || '—'], ['处置备注', selected.value.deal_remark || '—'],
 ] : [])
@@ -176,19 +184,32 @@ async function saveRule() { try { await saveAlarmRule(rule, editingId.value || u
 function openDeal(row: RecordRow) { dealTarget.value = row; dealRemark.value = ''; dealDialog.value = true }
 async function deal() { if (!dealTarget.value) return; try { await dealAlarm(dealTarget.value.id, { dealUser: session.user?.username || 'admin', dealRemark: dealRemark.value }); dealDialog.value = false; await load() } catch (e) { error.value = e instanceof Error ? e.message : '告警处置失败' } }
 function resetEvents() { keyword.value = ''; dealStatus.value = mode.value === 'alarm-workbench' ? '0' : ''; alarmType.value = ''; alarmLevel.value = ''; deviceId.value = ''; gatewayId.value = ''; orgId.value = ''; includeChildren.value = ''; startTime.value = ''; endTime.value = ''; load() }
+function goDevice(row: RecordRow | null = selected.value) {
+  const id = row?.device_id || deviceId.value
+  if (id) router.push(`/device-archive/devices/${id}`)
+}
+function goCommands(row: RecordRow | null = selected.value) {
+  const id = row?.device_id || deviceId.value
+  if (id) router.push({ path: '/access/commands', query: { targetId: String(id) } })
+}
+function goEnergy(row: RecordRow | null = selected.value) {
+  const id = row?.device_id || deviceId.value
+  const point = row?.point_code
+  if (id) router.push({ path: '/monitor/realtime', query: { deviceId: String(id), pointCode: point ? String(point) : '' } })
+}
 
 watch(() => route.fullPath, () => { dealStatus.value = mode.value === 'alarm-workbench' ? '0' : ''; syncQueryFilters(); load(); loadLookups() })
 onMounted(() => { syncQueryFilters(); load(); loadLookups() })
 </script>
 
 <template>
-  <section class="view-page" :class="{ 'alarm-rules-page': mode === 'alarm-rules' }">
-    <header class="view-head"><div><p class="eyebrow">ALARM MANAGEMENT</p><h1>{{ title }}</h1><p>{{ mode === 'alarm-rules' ? '告警规则配置。' : mode === 'alarm-workbench' ? '告警处置。' : '告警事件查询。' }}</p></div></header>
+  <section class="view-page" :class="mode === 'alarm-rules' ? 'alarm-rules-page' : 'alarm-workbench-page'">
+    <header class="view-head"><div><p class="eyebrow">ALARM MANAGEMENT</p><h1>{{ title }}</h1><p>{{ mode === 'alarm-rules' ? '规则配置' : mode === 'alarm-workbench' ? '处置队列' : '事件中心' }}</p></div><div class="head-actions"><button class="quiet" @click="load">刷新</button></div></header>
 
     <template v-if="mode !== 'alarm-rules'">
-      <div class="metric-grid compact-metrics"><article v-for="card in summaryCards" :key="card.label" class="metric" :class="card.tone"><span>{{ card.label }}</span><strong>{{ card.value }}</strong></article></div>
+      <div class="alarm-metric-grid"><article v-for="card in summaryCards" :key="card.label" class="alarm-metric" :class="card.tone"><span>{{ card.label }}</span><strong>{{ card.value }}</strong><em>{{ card.hint }}</em></article></div>
       <FilterBar v-model:keyword="keyword" :busy="loading" placeholder="设备、测点或告警类型" @query="load" @reset="resetEvents"><label class="field inline"><span>处理状态</span><select v-model="dealStatus"><option value="">全部</option><option value="0">未处理</option><option value="1">已处理</option></select></label><label class="field inline"><span>告警类型</span><select v-model="alarmType"><option value="">全部</option><option v-for="item in alarmTypeOptions" :key="item.value" :value="String(item.value)">{{ item.label }}</option></select></label><label class="field inline"><span>告警等级</span><select v-model="alarmLevel"><option value="">全部</option><option value="1">一般</option><option value="2">重要</option><option value="3">紧急</option></select></label><label class="field inline"><span>开始日期</span><input v-model="startTime" type="date"></label><label class="field inline"><span>结束日期</span><input v-model="endTime" type="date"></label></FilterBar>
-      <AppDataTable :title="mode === 'alarm-workbench' ? '待处理告警队列' : '告警事件列表'" :columns="eventColumns" :rows="rows" :loading="loading" :error="error" @refresh="load" @detail="(row) => selected = row"><template #cell-deal_status="{ value }"><StatusTag domain="alarm" :value="value" /></template><template #actions="{ row }"><button class="icon-btn" title="详情" aria-label="详情" @click="selected = row"><Eye :size="16" /></button><button v-if="Number(row.deal_status) === 0 && session.can('alarm:event:deal')" class="icon-btn" title="处置" aria-label="处置" @click="openDeal(row)"><CheckCircle2 :size="16" /></button></template></AppDataTable>
+      <AppDataTable :title="mode === 'alarm-workbench' ? '待处理告警队列' : '告警事件列表'" :columns="eventColumns" :rows="rows" :loading="loading" :error="error" @refresh="load" @detail="(row) => selected = row"><template #cell-alarm_level="{ value }"><span class="tag" :class="Number(value) === 3 ? 'danger' : Number(value) === 2 ? 'warn' : 'blue'">{{ alarmLevelLabel(value) }}</span></template><template #cell-deal_status="{ value }"><StatusTag domain="alarm" :value="value" /></template><template #actions="{ row }"><button class="icon-btn" title="详情" aria-label="详情" @click="selected = row"><Eye :size="16" /></button><button class="icon-btn" title="设备" aria-label="设备" @click="goDevice(row)"><Cpu :size="16" /></button><button class="icon-btn" title="运行" aria-label="运行" @click="goEnergy(row)"><Activity :size="16" /></button><button v-if="Number(row.deal_status) === 0 && session.can('alarm:event:deal')" class="icon-btn" title="处置" aria-label="处置" @click="openDeal(row)"><CheckCircle2 :size="16" /></button></template></AppDataTable>
     </template>
 
     <template v-else>
@@ -196,7 +217,7 @@ onMounted(() => { syncQueryFilters(); load(); loadLookups() })
       <AppDataTable :pageable="false" :columns="fullRuleColumns" :rows="rows" :loading="loading" :error="error" @refresh="load"><template #cell-enabled="{ value }"><StatusTag domain="online" :value="value" /></template><template #actions="{ row }"><button v-if="session.can('alarm:rule:edit')" class="icon-btn" title="编辑" aria-label="编辑" @click="openEdit(row)"><Pencil :size="16" /></button></template></AppDataTable>
     </template>
 
-    <AppDrawer :open="Boolean(selected)" title="告警详情" @update:open="(open) => { if (!open) selected = null }"><dl class="detail-grid"><template v-for="item in detailItems" :key="item[0]"><dt>{{ item[0] }}</dt><dd>{{ item[1] }}</dd></template></dl></AppDrawer>
+    <AppDrawer :open="Boolean(selected)" title="告警详情" @update:open="(open) => { if (!open) selected = null }"><dl class="detail-grid"><template v-for="item in detailItems" :key="item[0]"><dt>{{ item[0] }}</dt><dd>{{ item[1] }}</dd></template></dl><div class="drawer-actions alarm-drawer-actions"><button class="quiet" @click="goDevice()">设备档案</button><button class="quiet" @click="goEnergy()">实时监控</button><button class="quiet" @click="goCommands()">指令追踪</button><button v-if="selected && Number(selected.deal_status) === 0 && session.can('alarm:event:deal')" class="primary" @click="openDeal(selected)">处置告警</button></div></AppDrawer>
     <AppDialog v-model:open="dialog" :title="editingId ? '编辑告警规则' : '新增告警规则'" @submit="saveRule"><div class="dialog-fields"><label class="dialog-field"><span>规则名称*</span><input v-model="rule.rule_name" required></label><label class="dialog-field"><span>告警类型*</span><select v-model="rule.alarm_type"><option v-for="item in alarmTypeOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label class="dialog-field"><span>规则范围*</span><select v-model="rule.rule_scope"><option v-for="item in ruleScopeOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label class="dialog-field"><span>组织</span><select v-model="rule.org_id"><option value="">无</option><option v-for="org in orgOptions" :key="String(org.id)" :value="String(org.id)">{{ org.org_name }}</option></select></label><label class="dialog-field"><span>设备</span><select v-model="rule.device_id"><option value="">无</option><option v-for="device in deviceOptions" :key="String(device.id)" :value="String(device.id)">{{ device.device_name || device.device_sn }}</option></select></label><label class="dialog-field"><span>测点编码</span><input v-model="rule.point_code"></label><label class="dialog-field"><span>比较符</span><select v-model="rule.compare_operator"><option v-for="item in compareOperatorOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label class="dialog-field"><span>阈值</span><input v-model="rule.threshold_value" type="number"></label><label class="dialog-field"><span>区间下限</span><input v-model="rule.threshold_min" type="number"></label><label class="dialog-field"><span>区间上限</span><input v-model="rule.threshold_max" type="number"></label><label class="dialog-field"><span>告警等级</span><select v-model="rule.alarm_level"><option v-for="item in alarmLevelOptions" :key="item.value" :value="item.value">{{ item.label }}</option></select></label><label class="dialog-field full"><span>备注</span><textarea v-model="rule.remark"></textarea></label></div></AppDialog>
     <AppDialog v-model:open="dealDialog" title="处置告警" confirm-text="确认处置" @submit="deal"><div class="dialog-fields"><label class="dialog-field full"><span>处置备注</span><textarea v-model="dealRemark" required></textarea></label></div></AppDialog>
   </section>
