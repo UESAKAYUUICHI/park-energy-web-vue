@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useAlertRef } from '@/composables/useAppAlert'
 import { ChevronDown, ChevronRight, RefreshCw, Search } from '@lucide/vue'
 import { assignRolePermissions, assignUserRoles, rbac, rbacPage, rbacRelations } from '@/api/platform'
 import type { RecordRow } from '@/types/domain'
@@ -23,8 +24,8 @@ const roleChecks = ref<Set<string>>(new Set())
 const permissionChecks = ref<Set<string>>(new Set())
 const expandedPermissionIds = ref<Set<string>>(new Set())
 const loading = ref(false)
+const error = useAlertRef()
 const saving = ref(false)
-const error = ref('')
 
 const autoSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const searchTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -247,7 +248,6 @@ onBeforeUnmount(() => {
       </div>
       <button class="icon-btn" :disabled="loading || saving" title="刷新" aria-label="刷新" @click="load"><RefreshCw :size="17" /></button>
     </header>
-    <div v-if="error" class="notice">{{ error }}</div>
     <div class="rbac-board">
       <article class="panel rbac-column">
         <div class="panel-head">

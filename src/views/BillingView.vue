@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useAlertRef } from '@/composables/useAppAlert'
 import { useRoute } from 'vue-router'
 import AppDataTable from '@/components/app/AppDataTable.vue'
 import AppDrawer from '@/components/app/AppDrawer.vue'
@@ -23,7 +24,7 @@ const payStatus = ref('')
 const billCycle = ref('')
 const accountOptions = ref<RecordRow[]>([])
 const loading = ref(false)
-const error = ref('')
+const error = useAlertRef()
 const selected = ref<RecordRow | null>(null)
 const preview = ref<RecordRow | null>(null)
 const previewDialog = ref(false)

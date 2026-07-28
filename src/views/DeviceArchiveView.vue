@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useAlertRef } from '@/composables/useAppAlert'
 import { useRoute, useRouter } from 'vue-router'
-import { BarChart3, ChevronDown, ChevronRight, Copy, FileText, Pencil, RefreshCw, Search, Trash2 } from '@lucide/vue'
+import { BarChart3, ChevronDown, ChevronRight, Copy, FileText, Link2, Pencil, RefreshCw, Search, Trash2 } from '@lucide/vue'
 import { BarChart, LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent } from 'echarts/components'
 import { graphic, init, use, type ECharts, type EChartsCoreOption } from 'echarts/core'
@@ -9,7 +10,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import AppConfirmDialog from '@/components/app/AppConfirmDialog.vue'
 import AppDialog from '@/components/app/AppDialog.vue'
 import StatusTag from '@/components/app/StatusTag.vue'
-import { copyResource, createResource, deviceArchiveProfile, deviceTree, gatewayArchiveProfile, listResource, orgArchiveProfile, removeResource, rootOrgs, updateResource } from '@/api/platform'
+import { bindDevicesToGateway, copyResource, createResource, deviceArchiveProfile, deviceTree, gatewayArchiveProfile, listResource, orgArchiveProfile, removeResource, rootOrgs, saveDeviceTypePoints, updateResource } from '@/api/platform'
 import meterImage from '@/assets/meter-device.png'
 import type { RecordRow } from '@/types/domain'
 import { fieldLabel } from '@/utils/fieldLabels'
@@ -60,6 +61,19 @@ interface ArchiveForm extends Record<string, unknown> {
   install_time: string
 }
 
+interface PointDraft {
+  _draftKey: string
+  point_code: string
+  point_name: string
+  data_type: string
+  unit: string
+  business_role: string
+  billable: number
+  stat_enabled: number
+  sort: number
+  enabled: number
+}
+
 function formatDateInput(date: Date) {
   const y = date.getFullYear()
   const m = `${date.getMonth() + 1}`.padStart(2, '0')
@@ -92,15 +106,24 @@ const selectedNode = ref<TreeNode | null>(null)
 const showAllData = ref(false)
 const profile = ref<RecordRow>({})
 const loading = ref(false)
+const error = useAlertRef()
 const treeLoading = ref(false)
 const profileLoading = ref(false)
-const error = ref('')
 const dialog = ref(false)
+const bindDialog = ref(false)
 const deleteDialog = ref(false)
 const deletingNodeRef = ref<TreeNode | null>(null)
 const deleting = ref(false)
 const formType = ref<FormType>('org')
 const editingId = ref<unknown>(null)
+const bindingDeviceIds = ref<string[]>([])
+const bindingDevices = ref<RecordRow[]>([])
+const bindingKeyword = ref('')
+const bindingLoading = ref(false)
+const pointDrafts = ref<PointDraft[]>([])
+const pointSaving = ref(false)
+const pointEditor = ref<PointDraft | null>(null)
+const pointEditingKey = ref('')
 const form = reactive<ArchiveForm>({
   parent_id: 0,
   org_name: '',
@@ -126,6 +149,7 @@ const form = reactive<ArchiveForm>({
   install_time: '',
 })
 const activeArchiveTab = ref<'device' | 'inspection' | 'runtime'>('device')
+const detailWorkspaceTab = ref<'overview' | 'points'>('overview')
 const bottomArchiveTab = ref<'history' | 'alarm'>('history')
 const dataView = ref<'chart' | 'table'>('chart')
 const historyStart = ref(daysAgo(30))
@@ -150,7 +174,10 @@ const selectedIsDevice = computed(() => selectedNode.value?.nodeType === 'DEVICE
 const selectedIsGateway = computed(() => selectedNode.value?.nodeType === 'GATEWAY')
 const selectedIsOrg = computed(() => selectedNode.value?.nodeType === 'ORG')
 const selectedNodeTitle = computed(() => selectedNode.value ? nodeLabel(selectedNode.value) : '请选择左侧节点')
-const createLabel = computed(() => `+新增${selectedNode.value ? nodeTag(selectedNode.value) : '组织'}`)
+const createLabel = computed(() => selectedIsGateway.value ? '+新增网关' : '+新增组织')
+const showPrimaryCreate = computed(() => !selectedIsDevice.value)
+const showCreateGateway = computed(() => selectedIsOrg.value)
+const showBindDevice = computed(() => selectedIsGateway.value)
 const orgTypeOptions = [
   { label: '园区', value: 1 },
   { label: '企业', value: 2 },
@@ -169,6 +196,7 @@ const energyTrend = computed(() => (profile.value.energyTrend || []) as RecordRo
 const alarmTrend = computed(() => (profile.value.alarmTrend || []) as RecordRow[])
 const realtimeSnapshots = computed(() => (profile.value.realtimeSnapshots || []) as RecordRow[])
 const pointDefinitions = computed(() => ((profile.value.points as RecordRow | undefined)?.definitions || []) as RecordRow[])
+const pointMappings = computed(() => ((profile.value.points as RecordRow | undefined)?.mappings || []) as RecordRow[])
 const realtimeLookup = computed<Record<string, unknown>>(() => {
   const raw = profile.value.realtime
   if (Array.isArray(raw)) {
@@ -262,7 +290,7 @@ const runtimeCards = computed(() => {
       role: String(point.business_role || point.businessRole || ''),
       value: code ? realtimeValue(code) : undefined,
     }
-  }).filter((item) => showAllData.value || !isMissingValue(item.value))
+  })
 })
 const overviewCards = computed(() => {
   if (selectedIsDevice.value) return []
@@ -322,6 +350,7 @@ const archiveActionLinks = computed<ArchiveAction[]>(() => {
     archiveLink('账单中心', '/billing/bills', { orgId: id, includeChildren: 'true' }),
   ]
 })
+const bindableDevices = computed(() => bindingDevices.value.filter((device) => String(device.gateway_id || '') !== String(selectedNode.value?.id || '')))
 const viewToggleLabel = computed(() => dataView.value === 'chart' ? '图表' : '表格')
 const alarmTableColumns = computed(() => {
   const preferred = ['alarm_time', 'org_name', 'device_name', 'device_sn', 'alarm_type', 'alarm_level', 'point_code', 'alarm_value', 'threshold_value', 'deal_status', 'deal_time', 'deal_user', 'deal_remark']
@@ -482,22 +511,119 @@ function archiveFieldValue(key: string, value: unknown) {
   return String(value)
 }
 
+function toPointDraft(row: RecordRow = {}, index = 0): PointDraft {
+  return {
+    _draftKey: String(row.id || row._draftKey || `draft-${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`),
+    point_code: String(row.point_code || row.pointCode || ''),
+    point_name: String(row.point_name || row.pointName || ''),
+    data_type: String(row.data_type || row.dataType || 'DOUBLE'),
+    unit: String(row.unit || ''),
+    business_role: String(row.business_role || row.businessRole || 'INSTANT_VALUE'),
+    billable: Number(row.billable ?? 0),
+    stat_enabled: Number(row.stat_enabled ?? row.statEnabled ?? 1),
+    sort: Number(row.sort ?? index),
+    enabled: Number(row.enabled ?? 1),
+  }
+}
+
+function emptyPointDraft(index = pointDrafts.value.length): PointDraft {
+  return toPointDraft({ sort: index, data_type: 'DOUBLE', business_role: 'INSTANT_VALUE', billable: 0, stat_enabled: 1, enabled: 1 }, index)
+}
+
+function syncPointDrafts() {
+  pointDrafts.value = pointDefinitions.value.map((row, index) => toPointDraft(row, index))
+  pointEditor.value = emptyPointDraft(pointDrafts.value.length)
+  pointEditingKey.value = ''
+}
+
+function addPointDraft() {
+  pointEditor.value = emptyPointDraft(pointDrafts.value.length)
+  pointEditingKey.value = ''
+}
+
+function editPointDraft(point: PointDraft) {
+  pointEditor.value = { ...point }
+  pointEditingKey.value = point._draftKey
+}
+
+function confirmPointDraft() {
+  if (!pointEditor.value) pointEditor.value = emptyPointDraft(pointDrafts.value.length)
+  const draft = { ...pointEditor.value }
+  if (!draft.point_code.trim() || !draft.point_name.trim()) {
+    error.value = '测点编码和测点名称不能为空'
+    return
+  }
+  if (pointEditingKey.value) {
+    pointDrafts.value = pointDrafts.value.map((point) => point._draftKey === pointEditingKey.value ? { ...draft, _draftKey: point._draftKey } : point)
+  } else {
+    pointDrafts.value = [...pointDrafts.value, { ...draft, sort: pointDrafts.value.length }]
+  }
+  pointEditor.value = emptyPointDraft(pointDrafts.value.length)
+  pointEditingKey.value = ''
+}
+
+function togglePointEnabled(point: PointDraft) {
+  point.enabled = Number(point.enabled) === 1 ? 0 : 1
+  if (pointEditingKey.value === point._draftKey && pointEditor.value) {
+    pointEditor.value.enabled = point.enabled
+  }
+}
+
+function removePointDraft(index: number) {
+  const removed = pointDrafts.value[index]
+  pointDrafts.value = pointDrafts.value.filter((_, itemIndex) => itemIndex !== index)
+  if (removed && pointEditingKey.value === removed._draftKey) addPointDraft()
+}
+
+async function savePointDrafts() {
+  const typeId = detailDevice.value.device_type_id
+  if (!typeId) {
+    error.value = '请先为设备选择设备类型/型号'
+    return
+  }
+  const invalid = pointDrafts.value.find((point) => !point.point_code.trim() || !point.point_name.trim())
+  if (invalid) {
+    error.value = '测点编码和测点名称不能为空'
+    return
+  }
+  pointSaving.value = true
+  try {
+    const result = await saveDeviceTypePoints(typeId, {
+      definitions: pointDrafts.value.map(({ _draftKey, ...point }, index) => ({ ...point, sort: index })),
+      mappings: pointMappings.value,
+    })
+    profile.value = { ...profile.value, points: result }
+    syncPointDrafts()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '测点保存失败'
+  } finally {
+    pointSaving.value = false
+  }
+}
+
 async function selectNode(node: TreeNode) {
   selectedNode.value = node
   profileLoading.value = true
   try {
     if (node.nodeType === 'DEVICE') {
       profile.value = await deviceArchiveProfile(node.id)
+      syncPointDrafts()
       activeArchiveTab.value = 'device'
       bottomArchiveTab.value = 'history'
       dataView.value = 'chart'
     } else if (node.nodeType === 'GATEWAY') {
       profile.value = await gatewayArchiveProfile(node.id)
+      pointDrafts.value = []
+      pointEditor.value = null
+      pointEditingKey.value = ''
       activeArchiveTab.value = 'device'
       bottomArchiveTab.value = 'alarm'
       dataView.value = 'chart'
     } else {
       profile.value = await orgArchiveProfile(node.id)
+      pointDrafts.value = []
+      pointEditor.value = null
+      pointEditingKey.value = ''
       activeArchiveTab.value = 'device'
       bottomArchiveTab.value = 'alarm'
       dataView.value = 'chart'
@@ -561,12 +687,11 @@ function openDevice(gateway?: RecordRow, row?: RecordRow) {
 function openAddBySelection() {
   if (!selectedNode.value) return openOrg(0)
   if (selectedNode.value.nodeType === 'ORG') return openOrg(selectedNode.value.id)
-  if (selectedNode.value.nodeType === 'GATEWAY') return openGateway(selectedNode.value.org_id ?? selectedNode.value.id)
-  const gateway = gatewayOptions.value.find((item) => String(item.id) === String(selectedNode.value?.gateway_id)) || {
-    id: selectedNode.value.gateway_id,
-    org_id: selectedNode.value.org_id,
-  }
-  return openDevice(gateway, undefined)
+  if (selectedNode.value.nodeType === 'GATEWAY') return openGateway(selectedNode.value.org_id)
+}
+function openGatewayForSelectedOrg() {
+  if (!selectedNode.value || selectedNode.value.nodeType !== 'ORG') return
+  openGateway(selectedNode.value.id)
 }
 function editSelected() {
   if (!selectedNode.value) return
@@ -607,12 +732,69 @@ async function confirmDeleteNode() {
 async function saveForm() {
   try {
     const resource = formType.value === 'org' ? 'orgs' : formType.value === 'gateway' ? 'gateways' : 'devices'
-    if (editingId.value) await updateResource('archive', resource, editingId.value, { ...form })
-    else await createResource('archive', resource, { ...form })
+    const payload = formPayload()
+    if (editingId.value) await updateResource('archive', resource, editingId.value, payload)
+    else await createResource('archive', resource, payload)
     dialog.value = false
     await loadAll()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '保存失败'
+  }
+}
+
+function formPayload() {
+  const payload = { ...form } as RecordRow
+  if (formType.value === 'device') {
+    if (!payload.gateway_id) delete payload.gateway_id
+    if (!payload.org_id) payload.org_id = selectedRootOrgId.value || orgOptions.value[0]?.id || ''
+    if (!payload.install_time) delete payload.install_time
+  }
+  return payload
+}
+
+async function loadBindingDevices() {
+  bindingLoading.value = true
+  try {
+    const page = await listResource('archive', 'devices', { pageSize: 500, keyword: bindingKeyword.value })
+    bindingDevices.value = page.records.map((item) => ({
+      ...item,
+      org_name: orgOptions.value.find((org) => String(org.id) === String(item.org_id))?.org_name,
+      gateway_name: gatewayOptions.value.find((gateway) => String(gateway.id) === String(item.gateway_id))?.gateway_name,
+      gateway_sn: gatewayOptions.value.find((gateway) => String(gateway.id) === String(item.gateway_id))?.gateway_sn,
+      type_name: typeOptions.value.find((type) => String(type.id) === String(item.device_type_id))?.type_name,
+    }))
+  } finally {
+    bindingLoading.value = false
+  }
+}
+
+async function openBindDevices() {
+  if (!selectedNode.value || selectedNode.value.nodeType !== 'GATEWAY') return
+  bindingDeviceIds.value = []
+  bindingKeyword.value = ''
+  bindDialog.value = true
+  await loadBindingDevices()
+}
+
+function toggleBindingDevice(id: unknown, checked: boolean) {
+  const value = String(id)
+  bindingDeviceIds.value = checked ? [...new Set([...bindingDeviceIds.value, value])] : bindingDeviceIds.value.filter((item) => item !== value)
+}
+
+async function submitBindDevices() {
+  if (!selectedNode.value || selectedNode.value.nodeType !== 'GATEWAY') return
+  if (!bindingDeviceIds.value.length) {
+    error.value = '请选择需要绑定的设备'
+    return
+  }
+  try {
+    await bindDevicesToGateway(selectedNode.value.id, bindingDeviceIds.value)
+    bindDialog.value = false
+    await loadAll()
+    const node = findNodeByKey(tree.value, nodeKey(selectedNode.value))
+    if (node) await selectNode(node)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '绑定设备失败'
   }
 }
 
@@ -669,6 +851,7 @@ async function loadDetail() {
   const id = route.params.id
   if (!id) return
   profile.value = await deviceArchiveProfile(id)
+  syncPointDrafts()
   const detail = profile.value as RecordRow & { device?: RecordRow }
   selectedNode.value = {
     id,
@@ -679,6 +862,7 @@ async function loadDetail() {
     org_id: detail.device?.org_id || detail.org_id,
   } as TreeNode
   activeArchiveTab.value = 'device'
+  detailWorkspaceTab.value = 'overview'
   bottomArchiveTab.value = 'history'
   dataView.value = 'chart'
   await renderCharts()
@@ -785,6 +969,7 @@ async function renderCharts() {
   if (activeArchiveTab.value === 'device') {
     const isDetail = mode.value === 'device-detail'
     const isDeviceTree = selectedIsDevice.value && !isDetail
+    const shouldRenderDeviceChart = selectedIsDevice.value || isDetail
     const chartEl = isDetail ? detailRealtimeChartEl.value : isDeviceTree ? deviceRealtimeChartEl.value : overviewRealtimeChartEl.value
     const chartRef = isDetail ? detailRealtimeChart : isDeviceTree ? deviceRealtimeChart : overviewRealtimeChart
     if (chartEl) {
@@ -792,7 +977,7 @@ async function renderCharts() {
       if (isDetail) detailRealtimeChart = chart
       else if (isDeviceTree) deviceRealtimeChart = chart
       else overviewRealtimeChart = chart
-      if (selectedIsDevice.value) {
+      if (shouldRenderDeviceChart) {
         if (deviceRealtimePointRows.value.length) {
           chart.setOption(
             barOption(
@@ -898,7 +1083,7 @@ watch([selectedRootOrgId, treeKeyword], () => {
   }
   if (mode.value === 'org-tree') scheduleTreeQuery()
 })
-watch([activeArchiveTab, bottomArchiveTab, dataView, () => profile.value], () => { void renderCharts() }, { deep: true })
+watch([activeArchiveTab, detailWorkspaceTab, bottomArchiveTab, dataView, () => profile.value], () => { void renderCharts() }, { deep: true })
 watch(bottomArchiveTab, (tab) => {
   if (tab === 'history') dataView.value = 'chart'
 })
@@ -931,8 +1116,6 @@ onBeforeUnmount(() => {
         <button v-if="mode === 'device-detail'" class="quiet" @click="router.push('/device-archive/devices')">返回列表</button>
       </div>
     </header>
-    <div v-if="error" class="notice">{{ error }}</div>
-
     <template v-if="mode === 'org-tree'">
       <div class="archive-workbench">
         <aside class="archive-sidebar-panel">
@@ -978,7 +1161,9 @@ onBeforeUnmount(() => {
         <section class="archive-main-panel">
           <div class="archive-toolbar">
             <div class="archive-toolbar-actions">
-              <button class="primary add-action" @click="openAddBySelection">{{ createLabel }}</button>
+              <button v-if="showPrimaryCreate" class="primary add-action" @click="openAddBySelection">{{ createLabel }}</button>
+              <button v-if="showCreateGateway" class="quiet add-action" @click="openGatewayForSelectedOrg">+新增网关</button>
+              <button v-if="showBindDevice" class="quiet add-action" @click="openBindDevices"><Link2 :size="15" />绑定设备</button>
               <button class="icon-btn" :disabled="!selectedNode" title="复制" aria-label="复制" @click="duplicateSelection"><Copy :size="16" /></button>
               <button class="icon-btn" :disabled="!selectedNode" title="编辑" aria-label="编辑" @click="editSelected"><Pencil :size="16" /></button>
               <button class="icon-btn danger-text" :disabled="!selectedNode" title="删除" aria-label="删除" @click="deleteSelected"><Trash2 :size="16" /></button>
@@ -1175,6 +1360,7 @@ onBeforeUnmount(() => {
             <button class="btn-primary" @click="loadDevices"><Search :size="15" />查询</button>
           </div>
           <div class="filter-extra-actions">
+            <button class="primary add-action" @click="openDevice(undefined)">+新增设备</button>
             <button class="icon-btn" title="刷新" aria-label="刷新" @click="loadDevices"><RefreshCw :size="16" /></button>
           </div>
         </div>
@@ -1186,7 +1372,7 @@ onBeforeUnmount(() => {
           <div class="device-card-info">
             <h3>{{ item.device_name || item.device_sn }}</h3>
             <p>{{ item.device_sn }} · {{ item.type_name || '设备' }}</p>
-            <p>{{ item.org_name || `组织 ${item.org_id}` }} / {{ item.gateway_name || item.gateway_sn || `网关 ${item.gateway_id}` }}</p>
+            <p>{{ item.org_name || '未分配组织' }} / {{ item.gateway_name || item.gateway_sn || '未绑定网关' }}</p>
           </div>
           <div class="device-card-actions">
             <StatusTag domain="online" :value="item.status" />
@@ -1204,7 +1390,7 @@ onBeforeUnmount(() => {
           <dl class="detail-grid">
             <dt>设备名称</dt><dd>{{ detailDevice.device_name || '—' }}</dd>
             <dt>设备编号</dt><dd>{{ detailDevice.device_sn || '—' }}</dd>
-            <dt>设备类型</dt><dd>{{ detailDevice.type_name || detailDevice.type_code || '—' }}</dd>
+            <dt>设备类型/型号</dt><dd>{{ detailDevice.type_name || detailDevice.type_code || '—' }}</dd>
             <dt>所属组织</dt><dd>{{ detailDevice.org_name || '—' }}</dd>
             <dt>接入网关</dt><dd>{{ detailDevice.gateway_name || detailDevice.gateway_sn || '—' }}</dd>
             <dt>安装位置</dt><dd>{{ detailDevice.install_location || '—' }}</dd>
@@ -1212,41 +1398,107 @@ onBeforeUnmount(() => {
           </dl>
         </aside>
         <section class="device-detail-right">
-          <article class="panel">
-            <div class="panel-head"><h3>实时运行曲线</h3><small>ECharts</small></div>
-            <div ref="detailRealtimeChartEl" class="device-energy-chart"></div>
+          <article class="panel device-workspace-panel">
+            <div class="panel-head device-workspace-head">
+              <div>
+                <h3>{{ detailWorkspaceTab === 'overview' ? '设备运行工作区' : '测点管理' }}</h3>
+                <small>{{ detailDevice.type_name || detailDevice.type_code || '设备类型/型号' }}</small>
+              </div>
+              <div class="device-workspace-tabs">
+                <button class="quiet" :class="{ active: detailWorkspaceTab === 'overview' }" @click="detailWorkspaceTab = 'overview'">运行总览</button>
+                <button class="quiet" :class="{ active: detailWorkspaceTab === 'points' }" @click="detailWorkspaceTab = 'points'">测点管理</button>
+              </div>
+            </div>
+
+            <template v-if="detailWorkspaceTab === 'overview'">
+              <div class="device-workspace-grid">
+                <section class="device-workspace-chart">
+                  <div class="archive-section-title"><i></i><h3>实时运行曲线</h3><small>ECharts</small></div>
+                  <div ref="detailRealtimeChartEl" class="device-energy-chart"></div>
+                </section>
+                <section class="device-workspace-list">
+                  <div class="archive-section-title"><i></i><h3>最近历史数据</h3><small>日统计</small></div>
+                  <div class="compact-list">
+                    <div v-for="row in recentHistory" :key="String(row.id || `${row.stat_date}-${row.point_code}`)">
+                      <b>{{ row.point_code }} · {{ row.usage_value ?? '—' }}</b>
+                      <span>{{ row.stat_date }} / 完整率 {{ row.data_complete_rate ?? '—' }}%</span>
+                    </div>
+                    <div v-if="!recentHistory.length"><b>暂无历史数据</b><span>日统计写入后将在此展示。</span></div>
+                  </div>
+                </section>
+                <section class="device-workspace-list">
+                  <div class="archive-section-title"><i></i><h3>最近告警数据</h3><small>告警事件</small></div>
+                  <div class="compact-list">
+                    <div v-for="row in recentAlarms" :key="String(row.id)">
+                      <b>{{ alarmTypeText(row.alarm_type) }} · {{ alarmLevelText(row.alarm_level) }}</b>
+                      <span>{{ row.point_code || '—' }} / {{ row.alarm_time || '—' }}</span>
+                    </div>
+                    <div v-if="!recentAlarms.length"><b>暂无告警数据</b><span>该设备近期没有告警记录。</span></div>
+                  </div>
+                </section>
+              </div>
+            </template>
+
+            <template v-else>
+              <div class="point-workspace-toolbar">
+                <span>测点属于当前设备类型/型号，保存后同类型设备共用。</span>
+                <div>
+                  <button class="quiet" @click="addPointDraft">新增测点</button>
+                  <button class="primary" :disabled="pointSaving" @click="savePointDrafts">{{ pointSaving ? '保存中...' : '保存测点' }}</button>
+                </div>
+              </div>
+              <div class="point-workspace-body">
+                <div class="point-manage-display">
+                  <div v-if="!pointDrafts.length" class="archive-no-data">暂无测点配置。</div>
+                  <div v-else class="point-manage-grid">
+                    <article v-for="(point, index) in pointDrafts" :key="point._draftKey" class="point-manage-card">
+                      <div class="point-card-head">
+                        <div>
+                          <b>{{ point.point_name || '未命名测点' }}</b>
+                          <span class="point-status" :class="{ off: Number(point.enabled) !== 1 }"><i></i>{{ Number(point.enabled) === 1 ? '启用' : '未启用' }}</span>
+                        </div>
+                        <div class="point-card-actions">
+                          <button class="icon-btn" title="修改测点" aria-label="修改测点" @click="editPointDraft(point)"><Pencil :size="15" /></button>
+                          <button class="icon-btn danger-text" title="删除测点" aria-label="删除测点" @click="removePointDraft(index)"><Trash2 :size="15" /></button>
+                        </div>
+                      </div>
+                      <dl class="point-card-info">
+                        <dt>编码</dt><dd>{{ point.point_code || '—' }}</dd>
+                        <dt>类型</dt><dd>{{ point.data_type || '—' }}</dd>
+                        <dt>单位</dt><dd>{{ point.unit || '—' }}</dd>
+                        <dt>角色</dt><dd>{{ point.business_role || '—' }}</dd>
+                        <dt>计费</dt><dd>{{ Number(point.billable) === 1 ? '是' : '否' }}</dd>
+                        <dt>统计</dt><dd>{{ Number(point.stat_enabled) === 1 ? '是' : '否' }}</dd>
+                      </dl>
+                      <button class="point-enable-switch" :class="{ off: Number(point.enabled) !== 1 }" :title="Number(point.enabled) === 1 ? '停用测点' : '启用测点'" :aria-label="Number(point.enabled) === 1 ? '停用测点' : '启用测点'" @click="togglePointEnabled(point)"><i></i></button>
+                    </article>
+                  </div>
+                </div>
+                <aside v-if="pointEditor" class="point-editor-panel">
+                  <div class="point-editor-head">
+                    <h4>{{ pointEditingKey ? '修改测点' : '新增测点' }}</h4>
+                    <span>{{ pointEditor.point_name || pointEditor.point_code || '待配置' }}</span>
+                  </div>
+                  <div class="point-editor-fields">
+                    <label><span>测点编码</span><input v-model.trim="pointEditor.point_code" placeholder="total_active_energy"></label>
+                    <label><span>测点名称</span><input v-model.trim="pointEditor.point_name" placeholder="总有功电能"></label>
+                    <label><span>数据类型</span><select v-model="pointEditor.data_type"><option>DOUBLE</option><option>INTEGER</option><option>STRING</option></select></label>
+                    <label><span>单位</span><input v-model.trim="pointEditor.unit" placeholder="kWh"></label>
+                    <label><span>业务角色</span><input v-model.trim="pointEditor.business_role" placeholder="INSTANT_VALUE"></label>
+                    <label><span>可计费</span><select v-model.number="pointEditor.billable"><option :value="0">否</option><option :value="1">是</option></select></label>
+                    <label><span>纳入统计</span><select v-model.number="pointEditor.stat_enabled"><option :value="1">是</option><option :value="0">否</option></select></label>
+                    <label><span>启用状态</span><select v-model.number="pointEditor.enabled"><option :value="1">启用</option><option :value="0">未启用</option></select></label>
+                  </div>
+                  <button class="primary point-confirm-btn" @click="confirmPointDraft">{{ pointEditingKey ? '确认修改' : '确认新增' }}</button>
+                </aside>
+              </div>
+            </template>
           </article>
-          <div class="panel-split">
-            <article class="panel">
-              <div class="panel-head"><h3>最近历史数据</h3><small>日统计</small></div>
-              <div class="panel-scroll">
-                <div class="compact-list">
-                  <div v-for="row in recentHistory" :key="String(row.id || `${row.stat_date}-${row.point_code}`)">
-                    <b>{{ row.point_code }} · {{ row.usage_value ?? '—' }}</b>
-                    <span>{{ row.stat_date }} / 完整率 {{ row.data_complete_rate ?? '—' }}%</span>
-                  </div>
-                  <div v-if="!recentHistory.length"><b>暂无历史数据</b><span>日统计写入后将在此展示。</span></div>
-                </div>
-              </div>
-            </article>
-            <article class="panel">
-              <div class="panel-head"><h3>最近告警数据</h3><small>告警事件</small></div>
-              <div class="panel-scroll">
-                <div class="compact-list">
-                  <div v-for="row in recentAlarms" :key="String(row.id)">
-                    <b>{{ row.alarm_type || '告警' }} · 等级 {{ row.alarm_level || '—' }}</b>
-                    <span>{{ row.point_code || '—' }} / {{ row.alarm_time || '—' }}</span>
-                  </div>
-                  <div v-if="!recentAlarms.length"><b>暂无告警数据</b><span>该设备近期没有告警记录。</span></div>
-                </div>
-              </div>
-            </article>
-          </div>
         </section>
       </div>
     </template>
 
-    <AppDialog v-model:open="dialog" :title="editingId ? '编辑档案' : '新增档案'" :description="formType === 'device' ? '按当前节点维护设备档案。' : '按当前节点维护层级档案。'" @submit="saveForm">
+    <AppDialog v-model:open="dialog" :title="editingId ? '编辑档案' : '新增档案'" :description="formType === 'device' ? '设备主数据。' : '层级档案。'" @submit="saveForm">
       <div v-if="formType === 'org'" class="dialog-fields">
         <label class="dialog-field"><span>上级组织</span><select v-model="form.parent_id"><option :value="0">无</option><option v-for="org in orgOptions" :key="String(org.id)" :value="String(org.id)">{{ org.org_name }}</option></select></label>
         <label class="dialog-field"><span>组织名称*</span><input v-model="form.org_name" required></label>
@@ -1265,15 +1517,38 @@ onBeforeUnmount(() => {
         <label class="dialog-field"><span>启用状态</span><select v-model="form.status"><option v-for="item in statusOptions" :key="String(item.value)" :value="item.value">{{ item.label }}</option></select></label>
       </div>
       <div v-else class="dialog-fields">
-        <label class="dialog-field"><span>接入网关*</span><select v-model="form.gateway_id"><option value="">无</option><option v-for="gateway in gatewayOptions" :key="String(gateway.id)" :value="String(gateway.id)">{{ gateway.gateway_name || gateway.gateway_sn }}</option></select></label>
-        <label class="dialog-field"><span>所属组织*</span><select v-model="form.org_id"><option value="">无</option><option v-for="org in orgOptions" :key="String(org.id)" :value="String(org.id)">{{ org.org_name }}</option></select></label>
-        <label class="dialog-field"><span>设备类型*</span><select v-model="form.device_type_id"><option value="">无</option><option v-for="type in typeOptions" :key="String(type.id)" :value="String(type.id)">{{ type.type_name || type.type_code }}</option></select></label>
+        <label class="dialog-field"><span>接入网关</span><select v-model="form.gateway_id"><option value="">待绑定</option><option v-for="gateway in gatewayOptions" :key="String(gateway.id)" :value="String(gateway.id)">{{ gateway.gateway_name || gateway.gateway_sn }}</option></select></label>
+        <label class="dialog-field"><span>所属组织</span><select v-model="form.org_id"><option value="">待绑定</option><option v-for="org in orgOptions" :key="String(org.id)" :value="String(org.id)">{{ org.org_name }}</option></select></label>
+        <label class="dialog-field"><span>设备类型/型号*</span><select v-model="form.device_type_id"><option value="">无</option><option v-for="type in typeOptions" :key="String(type.id)" :value="String(type.id)">{{ type.type_name || type.type_code }}</option></select></label>
         <label class="dialog-field"><span>设备编号*</span><input v-model="form.device_sn" required></label>
         <label class="dialog-field"><span>设备名称*</span><input v-model="form.device_name" required></label>
         <label class="dialog-field"><span>协议地址</span><input v-model="form.protocol_addr"></label>
         <label class="dialog-field"><span>安装位置</span><input v-model="form.install_location"></label>
         <label class="dialog-field"><span>设备型号</span><input v-model="form.device_model"></label>
         <label class="dialog-field"><span>启用状态</span><select v-model="form.status"><option v-for="item in statusOptions" :key="String(item.value)" :value="item.value">{{ item.label }}</option></select></label>
+      </div>
+    </AppDialog>
+
+    <AppDialog v-model:open="bindDialog" title="绑定设备" confirm-text="确认绑定" @submit="submitBindDevices">
+      <div class="archive-bind-dialog">
+        <div class="archive-search-row">
+          <label class="archive-search-box">
+            <Search :size="15" />
+            <input v-model.trim="bindingKeyword" placeholder="搜索设备编号、名称" @keyup.enter="loadBindingDevices">
+          </label>
+          <button class="icon-btn" title="查询" aria-label="查询" @click="loadBindingDevices"><Search :size="16" /></button>
+        </div>
+        <div v-if="bindingLoading" class="empty-state">正在读取设备...</div>
+        <div v-else-if="!bindableDevices.length" class="empty-state">暂无可绑定设备。</div>
+        <div v-else class="archive-bind-list">
+          <label v-for="device in bindableDevices" :key="String(device.id)" class="archive-bind-item">
+            <input type="checkbox" :checked="bindingDeviceIds.includes(String(device.id))" @change="toggleBindingDevice(device.id, ($event.target as HTMLInputElement).checked)">
+            <span>
+              <b>{{ device.device_name || device.device_sn }}</b>
+              <small>{{ device.device_sn }} · {{ device.type_name || '设备类型/型号' }} · {{ device.gateway_name || device.gateway_sn || '未绑定网关' }}</small>
+            </span>
+          </label>
+        </div>
       </div>
     </AppDialog>
 

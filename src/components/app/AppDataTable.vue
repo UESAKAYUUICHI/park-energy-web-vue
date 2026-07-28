@@ -60,8 +60,7 @@ const nextPage = () => goPage(activePage.value + 1)
 <template>
   <article class="table-panel app-table">
     <div v-if="title" class="table-tools"><h3>{{ title }}</h3><slot name="toolbar"></slot></div>
-    <div v-if="error" class="service-error"><b>{{ error.includes('服务') || error.includes('连接') || error.includes('503') ? '服务不可用' : '请求失败' }}</b><p>{{ error }}</p><button class="quiet" @click="emit('refresh')">重新请求</button></div>
-    <div v-else-if="loading" class="empty-state">正在读取 Platform 数据…</div>
+    <div v-if="loading" class="empty-state">正在读取 Platform 数据…</div>
     <div v-else-if="!rows.length" class="empty-state">{{ emptyText || '当前条件下暂无数据。' }}</div>
     <template v-else>
       <div class="table-scroll"><table class="data-table" :class="{ 'has-actions': !hideActions }"><thead><tr><th v-for="column in visibleColumns" :key="column.key" :style="{ width: column.width }">{{ column.label }}</th><th v-if="!hideActions"><slot name="action-title">操作</slot></th></tr></thead><tbody><tr v-for="row in visibleRows" :key="String(row.id || row.command_id || row.bill_no)"><td v-for="column in visibleColumns" :key="column.key"><slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]">{{ valueOf(row, column) }}</slot></td><td v-if="!hideActions" class="row-actions"><slot name="actions" :row="row"><button class="link-btn" @click="emit('detail', row)">详情</button></slot></td></tr></tbody></table></div>

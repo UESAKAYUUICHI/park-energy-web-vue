@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useAlertRef } from '@/composables/useAppAlert'
 import { useRoute } from 'vue-router'
 import AppDataTable, { type TableColumn } from '@/components/app/AppDataTable.vue'
 import AppConfirmDialog from '@/components/app/AppConfirmDialog.vue'
@@ -11,7 +12,35 @@ import type { RecordRow } from '@/types/domain'
 import { useSessionStore } from '@/stores/session'
 import { fieldLabel } from '@/utils/fieldLabels'
 
-const route = useRoute(); const session = useSessionStore(); const mode = computed(() => String(route.meta.kind)); const title = computed(() => String(route.meta.title)); const rows = ref<RecordRow[]>([]); const relations = ref<RecordRow>({}); const selected = ref<RecordRow | null>(null); const keyword = ref(''); const pageNum = ref(1); const total = ref(0); const loading = ref(false); const error = ref(''); const dialog = ref(false); const editingId = ref<unknown>(null); const form = reactive<Record<string, string | number>>({}); const relationDialog = ref(false); const relationTitle = ref(''); const relationTargetId = ref<unknown>(null); const relationMode = ref<'password' | 'roles' | 'permissions' | 'scopes'>('roles'); const relationText = ref(''); const expandedPermissionIds = ref<Set<string>>(new Set()); const deleteDialog = ref(false); const deletingRow = ref<RecordRow | null>(null); const deleting = ref(false); const orgOptions = ref<RecordRow[]>([]); const relationUsers = ref<RecordRow[]>([]); const relationRoles = ref<RecordRow[]>([]); const relationPermissions = ref<RecordRow[]>([])
+const route = useRoute()
+const session = useSessionStore()
+const mode = computed(() => String(route.meta.kind))
+const title = computed(() => String(route.meta.title))
+const rows = ref<RecordRow[]>([])
+const relations = ref<RecordRow>({})
+const selected = ref<RecordRow | null>(null)
+const keyword = ref('')
+const pageNum = ref(1)
+const total = ref(0)
+const loading = ref(false)
+const error = useAlertRef()
+const dialog = ref(false)
+const editingId = ref<unknown>(null)
+const form = reactive<Record<string, string | number>>({})
+const relationDialog = ref(false)
+const relationTitle = ref('')
+const relationTargetId = ref<unknown>(null)
+const relationMode = ref<'password' | 'roles' | 'permissions' | 'scopes'>('roles')
+const relationText = ref('')
+const expandedPermissionIds = ref<Set<string>>(new Set())
+const deleteDialog = ref(false)
+const deletingRow = ref<RecordRow | null>(null)
+const deleting = ref(false)
+const orgOptions = ref<RecordRow[]>([])
+const relationUsers = ref<RecordRow[]>([])
+const relationRoles = ref<RecordRow[]>([])
+const relationPermissions = ref<RecordRow[]>([])
+
 const configuration = computed(() => ({ users: { endpoint: 'users', permission: 'system:user', columns: [{ key: 'username', label: '登录名' }, { key: 'nickname', label: '姓名' }, { key: 'orgId', label: '默认组织' }, { key: 'status', label: '状态' }], fields: ['username', 'nickname', 'password', 'orgId', 'phone', 'email', 'status'], defaults: { username: '', nickname: '', password: '', orgId: '', phone: '', email: '', status: 1 } }, roles: { endpoint: 'roles', permission: 'system:role', columns: [{ key: 'roleCode', label: '角色编码' }, { key: 'roleName', label: '角色名称' }, { key: 'dataScope', label: '数据范围' }, { key: 'status', label: '状态' }], fields: ['roleCode', 'roleName', 'dataScope', 'remark', 'status'], defaults: { roleCode: '', roleName: '', dataScope: 1, remark: '', status: 1 } }, permissions: { endpoint: 'permissions', permission: 'system:permission', columns: [{ key: 'permCode', label: '权限码' }, { key: 'permName', label: '权限名称' }, { key: 'permType', label: '类型' }, { key: 'parentId', label: '上级 ID' }, { key: 'sort', label: '排序' }], fields: ['permCode', 'permName', 'permType', 'parentId', 'routePath', 'componentPath', 'icon', 'sort', 'status'], defaults: { permCode: '', permName: '', permType: 3, parentId: 0, routePath: '', componentPath: '', icon: '', sort: 0, status: 1 } } } as Record<string, { endpoint: string; permission: string; columns: Array<{ key: string; label: string }>; fields: string[]; defaults: RecordRow }>)[mode.value])
 const canAdd = computed(() => configuration.value && session.can(`${configuration.value.permission}:add`)); const canEdit = computed(() => configuration.value && session.can(`${configuration.value.permission}:edit`)); const canDelete = computed(() => configuration.value && session.can(`${configuration.value.permission}:delete`))
 const createLabel = computed(() => `+ 新增${title.value.replace(/管理$/, '')}`)

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useAlertRef } from '@/composables/useAppAlert'
 import { useRoute } from 'vue-router'
 import AppDataTable, { type TableColumn } from '@/components/app/AppDataTable.vue'
 import AppConfirmDialog from '@/components/app/AppConfirmDialog.vue'
@@ -15,7 +16,35 @@ import { useSessionStore } from '@/stores/session'
 import { fieldLabel } from '@/utils/fieldLabels'
 
 const route = useRoute(); const session = useSessionStore(); const schema = computed(() => resourceSchemas[String(route.meta.resource || '').replace('billing:', '')]!)
-const rows = ref<RecordRow[]>([]); const selected = ref<RecordRow | null>(null); const keyword = ref(''); const orgId = ref(''); const gatewayId = ref(''); const deviceTypeId = ref(''); const accountId = ref(''); const pageNum = ref(1); const total = ref(0); const loading = ref(false); const error = ref(''); const dialog = ref(false); const saving = ref(false); const editingId = ref<unknown>(null); const form = reactive<Record<string, string | number>>({}); const parseDialog = ref(false); const parseForm = reactive<Record<string, string>>({ deviceTypeId: '', samplePayload: '{}' }); const batchDialog = ref(false); const batchTypeId = ref<unknown>(null); const batchText = ref('{\n  "definitions": [],\n  "mappings": []\n}'); const orgOptions = ref<RecordRow[]>([]); const gatewayOptions = ref<RecordRow[]>([]); const typeOptions = ref<RecordRow[]>([]); const deviceOptions = ref<RecordRow[]>([]); const accountOptions = ref<RecordRow[]>([]); const ruleOptions = ref<RecordRow[]>([]); const deleteDialog = ref(false); const deletingRow = ref<RecordRow | null>(null); const deleting = ref(false)
+const rows = ref<RecordRow[]>([])
+const selected = ref<RecordRow | null>(null)
+const keyword = ref('')
+const orgId = ref('')
+const gatewayId = ref('')
+const deviceTypeId = ref('')
+const accountId = ref('')
+const pageNum = ref(1)
+const total = ref(0)
+const loading = ref(false)
+const error = useAlertRef()
+const dialog = ref(false)
+const saving = ref(false)
+const editingId = ref<unknown>(null)
+const form = reactive<Record<string, string | number>>({})
+const parseDialog = ref(false)
+const parseForm = reactive<Record<string, string>>({ deviceTypeId: '', samplePayload: '{}' })
+const batchDialog = ref(false)
+const batchTypeId = ref<unknown>(null)
+const batchText = ref('{\n  "definitions": [],\n  "mappings": []\n}')
+const orgOptions = ref<RecordRow[]>([])
+const gatewayOptions = ref<RecordRow[]>([])
+const typeOptions = ref<RecordRow[]>([])
+const deviceOptions = ref<RecordRow[]>([])
+const accountOptions = ref<RecordRow[]>([])
+const ruleOptions = ref<RecordRow[]>([])
+const deleteDialog = ref(false)
+const deletingRow = ref<RecordRow | null>(null)
+const deleting = ref(false)
 const pageSize = 20; const canAdd = computed(() => session.can(schema.value.area === 'archive' ? 'archive:add' : 'billing:add')); const canEdit = computed(() => session.can(schema.value.area === 'archive' ? 'archive:edit' : 'billing:edit')); const canDelete = computed(() => session.can(schema.value.area === 'archive' ? 'archive:delete' : 'billing:delete'))
 const createLabel = computed(() => `+ 新增${schema.value.title.replace(/管理$/, '')}`)
 function orgTypeLabel(value: unknown): string {
