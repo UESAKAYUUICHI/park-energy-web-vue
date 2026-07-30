@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useAlertRef } from '@/composables/useAppAlert'
 import { useRoute, useRouter } from 'vue-router'
-import { BarChart3, ChevronDown, ChevronRight, Copy, FileText, Link2, Pencil, RefreshCw, Search, Trash2 } from '@lucide/vue'
+import { AlertTriangle, BarChart3, ChevronDown, ChevronRight, Copy, FileText, Link2, Pencil, RefreshCw, Search, Trash2 } from '@lucide/vue'
 import { BarChart, LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent } from 'echarts/components'
 import { graphic, init, use, type ECharts, type EChartsCoreOption } from 'echarts/core'
@@ -546,8 +546,11 @@ function editPointDraft(point: PointDraft) {
   pointEditingKey.value = point._draftKey
 }
 
-function confirmPointDraft() {
+async function confirmPointDraft() {
   if (!pointEditor.value) pointEditor.value = emptyPointDraft(pointDrafts.value.length)
+  const previousDrafts = pointDrafts.value.map((point) => ({ ...point }))
+  const previousEditor = { ...pointEditor.value }
+  const previousEditingKey = pointEditingKey.value
   const draft = { ...pointEditor.value }
   if (!draft.point_code.trim() || !draft.point_name.trim()) {
     error.value = '测点编码和测点名称不能为空'
@@ -560,31 +563,53 @@ function confirmPointDraft() {
   }
   pointEditor.value = emptyPointDraft(pointDrafts.value.length)
   pointEditingKey.value = ''
+  const saved = await persistPointDrafts()
+  if (!saved) {
+    pointDrafts.value = previousDrafts
+    pointEditor.value = previousEditor
+    pointEditingKey.value = previousEditingKey
+  }
 }
 
-function togglePointEnabled(point: PointDraft) {
+async function togglePointEnabled(point: PointDraft) {
+  const previousDrafts = pointDrafts.value.map((item) => ({ ...item }))
+  const previousEditor = pointEditor.value ? { ...pointEditor.value } : null
   point.enabled = Number(point.enabled) === 1 ? 0 : 1
   if (pointEditingKey.value === point._draftKey && pointEditor.value) {
     pointEditor.value.enabled = point.enabled
   }
+  const saved = await persistPointDrafts()
+  if (!saved) {
+    pointDrafts.value = previousDrafts
+    pointEditor.value = previousEditor
+  }
 }
 
-function removePointDraft(index: number) {
+async function removePointDraft(index: number) {
+  const previousDrafts = pointDrafts.value.map((point) => ({ ...point }))
+  const previousEditor = pointEditor.value ? { ...pointEditor.value } : null
+  const previousEditingKey = pointEditingKey.value
   const removed = pointDrafts.value[index]
   pointDrafts.value = pointDrafts.value.filter((_, itemIndex) => itemIndex !== index)
   if (removed && pointEditingKey.value === removed._draftKey) addPointDraft()
+  const saved = await persistPointDrafts()
+  if (!saved) {
+    pointDrafts.value = previousDrafts
+    pointEditor.value = previousEditor
+    pointEditingKey.value = previousEditingKey
+  }
 }
 
-async function savePointDrafts() {
+async function persistPointDrafts() {
   const typeId = detailDevice.value.device_type_id
   if (!typeId) {
     error.value = '请先为设备选择设备类型/型号'
-    return
+    return false
   }
   const invalid = pointDrafts.value.find((point) => !point.point_code.trim() || !point.point_name.trim())
   if (invalid) {
     error.value = '测点编码和测点名称不能为空'
-    return
+    return false
   }
   pointSaving.value = true
   try {
@@ -594,11 +619,17 @@ async function savePointDrafts() {
     })
     profile.value = { ...profile.value, points: result }
     syncPointDrafts()
+    return true
   } catch (e) {
     error.value = e instanceof Error ? e.message : '测点保存失败'
+    return false
   } finally {
     pointSaving.value = false
   }
+}
+
+async function savePointDrafts() {
+  await persistPointDrafts()
 }
 
 async function selectNode(node: TreeNode) {
@@ -1441,9 +1472,11 @@ onBeforeUnmount(() => {
 
             <template v-else>
               <div class="point-workspace-toolbar">
-                <span>测点属于当前设备类型/型号，保存后同类型设备共用。</span>
-                <div>
-                  <button class="quiet" @click="addPointDraft">新增测点</button>
+                <div class="point-workspace-note">
+                  <AlertTriangle :size="14" />
+                  <span>测点属于当前设备类型/型号，保存后同类型设备共用。</span>
+                </div>
+                <div class="point-workspace-actions">
                   <button class="primary" :disabled="pointSaving" @click="savePointDrafts">{{ pointSaving ? '保存中...' : '保存测点' }}</button>
                 </div>
               </div>

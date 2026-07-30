@@ -273,7 +273,10 @@
 .device-workspace-list .compact-list{flex:1;min-height:0;overflow:auto;scrollbar-width:none;-ms-overflow-style:none}
 .device-workspace-list .compact-list::-webkit-scrollbar{display:none}
 .point-workspace-toolbar{flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;border-bottom:1px solid var(--border);color:#52677f;font-size:12px}
-.point-workspace-toolbar>div{display:flex;align-items:center;gap:8px}
+.point-workspace-note{display:flex;align-items:center;gap:8px;min-width:0;padding:8px 12px;border:1px solid #f7d6a5;border-radius:7px;background:#fff8eb;color:#9a6700;font-weight:700}
+.point-workspace-note svg{flex:none;color:#f59e0b}
+.point-workspace-note span{min-width:0;line-height:1.35}
+.point-workspace-actions{display:flex;align-items:center;gap:8px}
 .point-manage-grid{flex:1;min-height:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;padding:14px;overflow:auto;scrollbar-width:none;-ms-overflow-style:none}
 .point-manage-grid::-webkit-scrollbar{display:none}
 .point-manage-card{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px;border:1px solid #dbe8f8;border-radius:8px;background:linear-gradient(180deg,#fbfdff,#fff)}
@@ -283,7 +286,7 @@
 .point-manage-card input,.point-manage-card select{width:100%;height:34px;padding:0 9px;border:1px solid var(--border);border-radius:6px;background:#fff;color:#1f2d3d;outline:0}
 .point-manage-card input:focus,.point-manage-card select:focus{border-color:var(--accent);box-shadow:0 0 0 3px #4c8dff18}
 @media(max-width:1180px){.device-detail-layout{grid-template-columns:1fr}.device-workspace-grid{grid-template-columns:1fr;grid-template-rows:auto}.device-workspace-chart{grid-row:auto}.device-workspace-chart .device-energy-chart{min-height:300px}}
-@media(max-width:720px){.device-workspace-head,.point-workspace-toolbar{align-items:flex-start;flex-direction:column}.device-workspace-tabs{margin-left:0}.point-workspace-toolbar>div{width:100%}.point-workspace-toolbar button{flex:1}.point-manage-card{grid-template-columns:1fr}}
+@media(max-width:720px){.device-workspace-head,.point-workspace-toolbar{align-items:flex-start;flex-direction:column}.device-workspace-tabs{margin-left:0}.point-workspace-actions{width:100%}.point-workspace-actions button{flex:1}.point-manage-card{grid-template-columns:1fr}}
 .point-workspace-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 315px;gap:12px;padding:0 0 0 14px;overflow:hidden}
 .point-manage-display{min-height:0;padding:14px 0;overflow:auto;scrollbar-width:none;-ms-overflow-style:none}
 .point-manage-display::-webkit-scrollbar{display:none}
