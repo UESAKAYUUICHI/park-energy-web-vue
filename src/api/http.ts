@@ -4,6 +4,7 @@ const baseUrl = import.meta.env.VITE_PLATFORM_BASE_URL || '/api/platform'
 const tokenKey = 'park-energy-token'
 const tokenNameKey = 'park-energy-token-name'
 const tokenPrefixKey = 'park-energy-token-prefix'
+const responseCache = new Map<string, { expires: number; value: unknown }>()
 const readStored = (key: string) => sessionStorage.getItem(key) || localStorage.getItem(key)
 const writeStored = (key: string, value: string) => { sessionStorage.setItem(key, value); localStorage.setItem(key, value) }
 const removeStored = (key: string) => { sessionStorage.removeItem(key); localStorage.removeItem(key) }
@@ -23,6 +24,11 @@ export function toQuery(params: Record<string, unknown> = {}) {
 }
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const startedAt = performance.now()
+  const method = init.method || 'GET'
+  const cacheKey = method === 'GET' ? path : ''
+  const cached = cacheKey ? responseCache.get(cacheKey) : undefined
+  if (cached && cached.expires > Date.now()) return cached.value as T
   const headers = new Headers(init.headers)
   headers.set('Accept', 'application/json')
   const token = getToken()
@@ -30,12 +36,34 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   let response: Response
   try { response = await fetch(`${baseUrl}${path}`, { ...init, headers }) }
-  catch { throw new ApiError(503, '无法连接 Platform 服务') }
+  catch { reportSlowApi(path, init, startedAt); throw new ApiError(503, '无法连接 Platform 服务') }
   let body: ApiResponse<T>
   try { body = await response.json() as ApiResponse<T> }
-  catch { throw new ApiError(response.status || 503, response.ok ? 'Platform 服务不可用或接口路径配置错误' : 'Platform 服务暂不可用') }
+  catch { reportSlowApi(path, init, startedAt); throw new ApiError(response.status || 503, response.ok ? 'Platform 服务不可用或接口路径配置错误' : 'Platform 服务暂不可用') }
+  reportSlowApi(path, init, startedAt)
   if (!response.ok || body.code !== 0) throw new ApiError(body.code || response.status || 503, body.message || '请求失败')
+  if (method !== 'GET') clearRequestCache()
+  if (cacheKey) responseCache.set(cacheKey, { expires: Date.now() + cacheTtl(path), value: body.data })
   return body.data
+}
+
+export function clearRequestCache(prefix = '') {
+  Array.from(responseCache.keys()).forEach((key) => { if (!prefix || key.startsWith(prefix)) responseCache.delete(key) })
+}
+
+function cacheTtl(path: string) {
+  if (path.includes('pageNum=') || path.includes('keyword=') || path.includes('status=')) return 0
+  if (path.includes('/archive/device-tree') || path.includes('/archive/org-tree')) return 60_000
+  if (path === '/catalog/tree' || path.startsWith('/catalog/tree?')) return 60_000
+  if (path.includes('/archive/orgs') || path.includes('/archive/gateways') || path.includes('/archive/device-types') || path.includes('/archive/devices') || path.includes('/billing/accounts') || path.includes('/billing/rules')) return 60_000
+  if (path.includes('/catalog/lookups') || path.includes('/catalog/attribute-tree') || path.includes('/catalog/point-tree') || path.includes('/catalog/published-options')) return 60_000
+  if (path.includes('/rbac/permissions') || path.includes('/rbac/org-tree') || path.includes('/archive/root-orgs')) return 60_000
+  return 0
+}
+
+function reportSlowApi(path: string, init: RequestInit, startedAt: number) {
+  const cost = Math.round(performance.now() - startedAt)
+  if (import.meta.env.DEV && cost > 800) console.warn(`[slow-api] ${init.method || 'GET'} ${path} ${cost}ms`)
 }
 
 export function unwrapRemote<T>(payload: T | RemoteEnvelope<T>): T {

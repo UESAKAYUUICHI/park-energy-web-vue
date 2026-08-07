@@ -37,6 +37,7 @@ export function useAlertRef(title = '请求失败', type: AlertType = 'error') {
       value = next
       trigger()
       if (next) showAppAlert({ title, message: next, type })
+      else closeAppAlert()
     },
   }))
 }

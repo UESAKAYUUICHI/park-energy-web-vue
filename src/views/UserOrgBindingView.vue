@@ -2,11 +2,11 @@
 import { computed, onMounted, ref } from 'vue'
 import { showAppAlert, useAlertRef } from '@/composables/useAppAlert'
 import FilterBar from '@/components/app/FilterBar.vue'
+import OrgScopeTreeNode from '@/components/org/OrgScopeTreeNode.vue'
 import { assignUserOrgScopes, rbacOrgTree, rbacPage, userOrgScopes } from '@/api/platform'
 import type { RecordRow } from '@/types/domain'
 import { useSessionStore } from '@/stores/session'
 
-interface TreeNode { item: RecordRow; level: number }
 type ScopeMode = 'SELF' | 'SUBTREE'
 
 const session = useSessionStore()
@@ -27,16 +27,6 @@ const visibleUsers = computed(() => users.value.filter((user) => {
   const text = `${user.username || ''} ${user.nickname || ''} ${user.phone || ''}`.toLowerCase()
   return !keyword.value || text.includes(keyword.value.toLowerCase())
 }))
-const flatOrgTree = computed<TreeNode[]>(() => {
-  const out: TreeNode[] = []
-  const walk = (items: RecordRow[], level: number) => items.forEach((item) => {
-    out.push({ item, level })
-    const children = Array.isArray(item.children) ? item.children as RecordRow[] : []
-    walk(children, level + 1)
-  })
-  walk(orgTree.value, 0)
-  return out
-})
 
 function userLabel(user: RecordRow) {
   return `${user.nickname || user.username || '未命名用户'}`
@@ -132,15 +122,8 @@ onMounted(load)
       <article class="panel rbac-column org-scope-column">
         <div class="panel-head"><div><h3>组织范围</h3><small>{{ checkedCount }} 个组织已绑定</small></div><button class="primary" :disabled="!selectedUserId || !canEdit || saving" @click="saveScopes">{{ saving ? '正在保存...' : '保存绑定' }}</button></div>
         <div class="permission-tree">
-          <label v-for="entry in flatOrgTree" :key="String(entry.item.id)" class="permission-node org-scope-node" :style="{ paddingLeft: `${10 + entry.level * 22}px` }">
-            <input type="checkbox" :checked="isChecked(entry.item.id)" :disabled="!canEdit" @change="toggleOrg(entry.item.id)">
-            <span class="tree-rail"></span><b>{{ orgLabel(entry.item) }}</b><small>{{ scopeModeLabel(selectedOrgModes[String(entry.item.id)] || 'SELF') }}</small>
-            <select :value="selectedOrgModes[String(entry.item.id)] || 'SELF'" :disabled="!isChecked(entry.item.id) || !canEdit" @change="setOrgMode(entry.item.id, ($event.target as HTMLSelectElement).value as ScopeMode)">
-              <option value="SELF">仅本组织</option>
-              <option value="SUBTREE">含下级</option>
-            </select>
-          </label>
-          <div v-if="!flatOrgTree.length && !loading" class="empty-state">暂无可绑定组织。</div>
+          <OrgScopeTreeNode v-for="node in orgTree" :key="String(node.key || node.id)" :node="node" :checked="isChecked(node.id)" :mode="selectedOrgModes[String(node.id)] || 'SELF'" :checked-map="Object.fromEntries(Object.keys(selectedOrgModes).map((id) => [id, true]))" :mode-map="selectedOrgModes" :disabled="!canEdit" @toggle="toggleOrg" @mode="setOrgMode" />
+          <div v-if="!orgTree.length && !loading" class="empty-state">暂无可绑定组织。</div>
         </div>
       </article>
     </div>
