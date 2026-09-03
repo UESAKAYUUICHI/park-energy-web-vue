@@ -137,7 +137,7 @@ onMounted(() => load(route.query.deviceId))
 <template>
   <section class="view-page business-center-page" :class="{ loading }">
     <header class="center-titlebar">
-      <div><p class="eyebrow">ASSET OPERATIONS CENTER</p><h1>资产运营中心</h1><p>选中设备后，档案、接入、质量、异常和运维记录会自动组合到同一上下文。</p></div>
+      <div><p class="eyebrow">ASSET OPERATIONS CENTER</p><h1>资产运营中心</h1></div>
       <div class="center-summary-strip"><span><b>{{ summary.deviceCount || 0 }}</b>台设备</span><span><b>{{ summary.onlineCount || 0 }}</b>网关在线</span><span class="warn"><b>{{ summary.abnormalCount || 0 }}</b>质量关注</span><span class="danger"><b>{{ summary.openAlarmCount || 0 }}</b>未结告警</span></div>
     </header>
     <p v-if="error" class="form-tip">{{ error }}</p>
@@ -185,11 +185,11 @@ onMounted(() => load(route.query.deviceId))
 
         <div v-else class="center-panel-grid">
           <article class="context-panel"><div class="context-panel-head"><div><p class="eyebrow">ACCESS</p><h3>接入配置摘要</h3></div><RadioReceiver :size="19" /></div><dl class="context-facts"><div><dt>所属网关</dt><dd>{{ selected.gatewayName || '未绑定' }}</dd></div><div><dt>设备编号</dt><dd>{{ selected.deviceSn }}</dd></div><div><dt>最近在线</dt><dd>{{ selected.gatewayLastOnline || '暂无' }}</dd></div></dl><div class="context-actions"><button v-if="capabilities.viewAccess" class="quiet" @click="go('/access/diagnostic', { deviceId: selected.id })">接入诊断</button><button v-if="capabilities.editArchive" class="quiet" @click="go('/archive/devices')">修改档案</button></div></article>
-          <article class="context-panel"><div class="context-panel-head"><div><p class="eyebrow">SETTLEMENT</p><h3>结算角色摘要</h3></div><Settings2 :size="19" /></div><dl class="context-facts"><div><dt>是否结算表计</dt><dd>{{ Number(selected.settlementEnabled) ? '是' : '否' }}</dd></div><div><dt>计量角色</dt><dd>{{ selected.meterRole || '--' }}</dd></div><div><dt>质量门槛</dt><dd>{{ selected.qualityThresholdPct || 95 }}%</dd></div></dl><button v-if="capabilities.viewBilling" class="inline-action" @click="go('/center/revenue')">前往经营结算中心 <ChevronRight :size="14" /></button><p v-else class="center-empty">当前角色仅可查看设备侧结算配置。</p></article>
+          <article class="context-panel"><div class="context-panel-head"><div><p class="eyebrow">SETTLEMENT</p><h3>结算角色摘要</h3></div><Settings2 :size="19" /></div><dl class="context-facts"><div><dt>是否结算表计</dt><dd>{{ Number(selected.settlementEnabled) ? '是' : '否' }}</dd></div><div><dt>计量角色</dt><dd>{{ selected.meterRole || '--' }}</dd></div><div><dt>质量门槛</dt><dd>{{ selected.qualityThresholdPct || 95 }}%</dd></div></dl><button v-if="capabilities.viewBilling" class="inline-action" @click="go('/billing/subjects')">前往结算对象总览 <ChevronRight :size="14" /></button><p v-else class="center-empty">当前角色仅可查看设备侧结算配置。</p></article>
         </div>
       </main>
       <div v-else class="object-stage center-empty-stage"><Cpu :size="38" /><h2>尚无可用设备</h2><p>请检查当前账号的数据范围，或先在资产配置中建设备档案。</p></div>
     </div>
-    <AppDialog v-model:open="repairDialog" title="发起设备检修" description="设备、组织和当前诊断会自动带入；创建后直接进入该工单的处置现场。" :saving="creatingRepair" confirm-text="创建并进入处置" @submit="submitRepair"><div class="dialog-fields"><label class="dialog-field"><span>优先级</span><select v-model="repairForm.priority"><option value="P1">P1 · 紧急</option><option value="P2">P2 · 一般</option><option value="P3">P3 · 计划处理</option></select></label><label class="dialog-field"><span>SLA 要求完成时间</span><input v-model="repairForm.slaDueTime" type="datetime-local"></label><label class="dialog-field full"><span>工单标题*</span><input v-model="repairForm.title" required></label><label class="dialog-field full"><span>问题描述</span><textarea v-model="repairForm.description" placeholder="补充现场现象、影响范围或检查建议"></textarea></label></div></AppDialog>
+    <AppDialog v-model:open="repairDialog" title="发起设备检修" :saving="creatingRepair" confirm-text="创建并进入处置" @submit="submitRepair"><div class="dialog-fields"><label class="dialog-field"><span>优先级</span><AppSelect v-model="repairForm.priority"><option value="P1">P1 · 紧急</option><option value="P2">P2 · 一般</option><option value="P3">P3 · 计划处理</option></AppSelect></label><label class="dialog-field"><span>SLA 要求完成时间</span><input v-model="repairForm.slaDueTime" type="datetime-local"></label><label class="dialog-field full"><span>工单标题*</span><input v-model="repairForm.title" required></label><label class="dialog-field full"><span>问题描述</span><textarea v-model="repairForm.description" placeholder="补充现场现象、影响范围或检查建议"></textarea></label></div></AppDialog>
   </section>
 </template>

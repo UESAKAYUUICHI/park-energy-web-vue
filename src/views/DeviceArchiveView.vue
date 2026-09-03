@@ -1,22 +1,21 @@
 <script setup lang="ts">
+import '../styles/archive-history-fix.css'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useAlertRef } from '@/composables/useAppAlert'
 import { useRoute, useRouter } from 'vue-router'
-import { AlertTriangle, BarChart3, Building2, ChevronDown, ChevronRight, Copy, Cpu, FileText, Pencil, RadioTower, RefreshCw, Search, Trash2 } from '@lucide/vue'
-import { BarChart, LineChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent } from 'echarts/components'
-import { graphic, init, use, type ECharts, type EChartsCoreOption } from 'echarts/core'
-import { CanvasRenderer } from 'echarts/renderers'
+import { AlertTriangle, BarChart3, Building2, ChevronDown, ChevronRight, Copy, Cpu, FileText, Pencil, RadioTower, RefreshCw, Search, Trash2, X } from '@lucide/vue'
+import type { ECharts, EChartsCoreOption } from 'echarts/core'
 import AppConfirmDialog from '@/components/app/AppConfirmDialog.vue'
 import AppDialog from '@/components/app/AppDialog.vue'
+import AppImage from '@/components/app/AppImage.vue'
 import CatalogTreeNode from '@/components/catalog/CatalogTreeNode.vue'
 import StatusTag from '@/components/app/StatusTag.vue'
-import { bindDevicesToGateway, catalogModel, catalogTree, copyResource, createResource, deviceArchiveProfile, deviceTree, gatewayArchiveProfile, listResource, orgArchiveProfile, provisionDevice, publishedModelOptions, removeResource, rootOrgs, saveDeviceAttributeOverrides, saveDeviceTypePoints, updateDeviceContext, updateResource } from '@/api/platform'
-import meterImage from '@/assets/meter-device.png'
+import { bindDevicesToGateway, bindDiscoveredDevice, catalogModel, catalogTree, copyResource, createResource, deleteMetricTemplate, deviceArchiveProfile, deviceCards, deviceProfile, deviceTree, gatewayArchiveProfile, listResource, metricTemplates as loadMetricTemplatesApi, orgArchiveProfile, parseDevicePayloadPreview, provisionDevice, publishedModelOptions, removeResource, replayAccessRawMessage, resourceOptions, rootOrgs, saveDeviceAttributeOverrides, saveDeviceTypePoints, saveMetricTemplate as saveMetricTemplateApi, statistics, updateDeviceContext, updateResource } from '@/api/platform'
+import { useSessionStore } from '@/stores/session'
 import type { RecordRow } from '@/types/domain'
+import { loadBasicChartRuntime, type BasicChartRuntime } from '@/utils/chartRuntime'
+import { withDeviceLookupLabels } from '@/utils/deviceArchive'
 import { fieldLabel } from '@/utils/fieldLabels'
-
-use([LineChart, BarChart, GridComponent, TooltipComponent, CanvasRenderer])
 
 type FormType = 'org' | 'gateway' | 'device'
 type NodeType = 'ORG' | 'GATEWAY' | 'DEVICE' | 'SPACE' | 'GROUP'
@@ -89,6 +88,10 @@ function formatDateInput(date: Date) {
   const d = `${date.getDate()}`.padStart(2, '0')
   return `${y}-${m}-${d}`
 }
+function normalizeDateInput(value: unknown, fallback = formatDateInput(new Date())) {
+  const matched = String(value || '').match(/^\d{4}-\d{2}-\d{2}/)
+  return matched ? matched[0] : fallback
+}
 function daysAgo(days: number) {
   const date = new Date()
   date.setHours(0, 0, 0, 0)
@@ -99,6 +102,7 @@ const archiveLink = (label: string, path: string, query: Record<string, string>)
 
 const route = useRoute()
 const router = useRouter()
+const session = useSessionStore()
 const mode = computed(() => String(route.meta.resource || 'org-tree'))
 const title = computed(() => mode.value === 'devices' ? '设备档案' : mode.value === 'device-detail' ? '设备详情' : '设备档案树')
 
@@ -116,18 +120,22 @@ const pointKeyword = ref('')
 const pointRoleFilters = ref<string[]>([])
 const tree = ref<TreeNode[]>([])
 const devices = ref<RecordRow[]>([])
+const deviceListLoading = ref(false)
 const gatewayOptions = ref<RecordRow[]>([])
 const typeOptions = ref<RecordRow[]>([])
+const spaceOptions = ref<RecordRow[]>([])
 const modelOptions = ref<RecordRow[]>([])
 const publishedCatalogTree = ref<RecordRow[]>([])
 const selectedModelTreeKey = ref('')
 const selectedOrgTreeKey = ref('')
 const selectedNode = ref<TreeNode | null>(null)
+const archiveSelectionStorageKey = 'park-energy.device-archive.selected-node'
 const showAllData = ref(false)
 const profile = ref<RecordRow>({})
 const loading = ref(false)
 const error = useAlertRef()
 const treeLoading = ref(false)
+let treeRequestVersion = 0
 const profileLoading = ref(false)
 const dialog = ref(false)
 const protocolAddressDialog = ref(false)
@@ -143,10 +151,15 @@ const bindingDeviceIds = ref<string[]>([])
 const bindingDevices = ref<RecordRow[]>([])
 const bindingKeyword = ref('')
 const bindingLoading = ref(false)
+const bindingTarget = ref<TreeNode | null>(null)
 const pointDrafts = ref<PointDraft[]>([])
 const pointSaving = ref(false)
 const pointEditor = ref<PointDraft | null>(null)
 const pointEditingKey = ref('')
+const parsePreviewDialog = ref(false)
+const parsePreviewBusy = ref(false)
+const parsePreviewPayload = ref('')
+const parsePreviewResult = ref<RecordRow | null>(null)
 const attributeDrafts = ref<Record<string, string>>({})
 const attributeSaving = ref(false)
 const deviceWizardStep = ref(1)
@@ -186,27 +199,73 @@ const form = reactive<ArchiveForm>({
   meter_factor: 1,
   quality_gate_start_date: formatDateInput(new Date()),
 })
-const activeArchiveTab = ref<'device' | 'inspection' | 'runtime'>('device')
+const activeArchiveTab = ref<'device' | 'inspection' | 'runtime' | 'history' | 'alarm'>('device')
 const detailWorkspaceTab = ref<'overview' | 'alarms' | 'billing' | 'attributes' | 'points'>('overview')
-const bottomArchiveTab = ref<'history' | 'alarm'>('history')
+const settlementSwitching = ref(false)
 const dataView = ref<'chart' | 'table'>('chart')
 const historyStart = ref(daysAgo(30))
 const historyEnd = ref(formatDateInput(new Date()))
 const historyInterval = ref('五分钟')
 const historyParam = ref('')
+type HistoryGranularity = 'day' | 'week' | 'month' | 'year' | 'total'
+const historyGranularity = ref<HistoryGranularity>('day')
+const historyAnchor = ref(formatDateInput(new Date()))
+const periodHistoryRows = ref<RecordRow[]>([])
+const hourlyMetricRows = ref<RecordRow[]>([])
+const realtimeMetricRows = ref<RecordRow[]>([])
+const metricTemplates = ref<RecordRow[]>([])
+const metricTemplateId = ref('')
+const metricTemplateName = ref('')
+const metricTemplateDialog = ref(false)
+const metricLoading = ref(false)
+const metricRequestToken = ref(0)
+const selectionRequestToken = ref(0)
+const selectedMetricPointCodes = ref<string[]>([])
+const alarmSearchKeyword = ref('')
+const alarmColumnFilters = ref<string[]>(['alarm_time', 'device_name', 'alarm_type', 'alarm_level', 'point_code', 'deal_status', 'work_order_no', 'work_order_status'])
+const alarmPage = ref(1)
+const alarmPageSize = 5
+const detailAlarmKeyword = ref('')
+const detailAlarmStatusFilter = ref('')
+const inspectionSearchKeyword = ref('')
+const inspectionTypeFilter = ref('')
+const metricPointSearchKeyword = ref('')
+const metricPointGroupFilters = ref<string[]>([])
 const overviewRealtimeChartEl = ref<HTMLElement | null>(null)
 const deviceRealtimeChartEl = ref<HTMLElement | null>(null)
 const detailRealtimeChartEl = ref<HTMLElement | null>(null)
 const historyChartEl = ref<HTMLElement | null>(null)
 const alarmChartEl = ref<HTMLElement | null>(null)
+const billingUsageChartEl = ref<HTMLElement | null>(null)
+const billingQualityChartEl = ref<HTMLElement | null>(null)
 let overviewRealtimeChart: ECharts | null = null
 let deviceRealtimeChart: ECharts | null = null
 let detailRealtimeChart: ECharts | null = null
 let historyChart: ECharts | null = null
 let alarmChart: ECharts | null = null
+let billingUsageChart: ECharts | null = null
+let billingQualityChart: ECharts | null = null
+let chartRuntime: BasicChartRuntime | null = null
 let treeTimer: ReturnType<typeof setTimeout> | null = null
+let detailContextTimer: ReturnType<typeof setTimeout> | null = null
 let ignoreNextTreeWatch = false
+let detailRequestVersion = 0
 let renderToken = 0
+
+function disposeArchiveCharts() {
+  overviewRealtimeChart?.dispose()
+  deviceRealtimeChart?.dispose()
+  detailRealtimeChart?.dispose()
+  historyChart?.dispose()
+  billingUsageChart?.dispose()
+  billingQualityChart?.dispose()
+  overviewRealtimeChart = null
+  deviceRealtimeChart = null
+  detailRealtimeChart = null
+  historyChart = null
+  billingUsageChart = null
+  billingQualityChart = null
+}
 
 const selectedIsDevice = computed(() => selectedNode.value?.nodeType === 'DEVICE')
 const selectedIsGateway = computed(() => selectedNode.value?.nodeType === 'GATEWAY')
@@ -311,13 +370,128 @@ const energyTrend = computed(() => (profile.value.energyTrend || []) as RecordRo
 const alarmTrend = computed(() => (profile.value.alarmTrend || []) as RecordRow[])
 const realtimeSnapshots = computed(() => (profile.value.realtimeSnapshots || []) as RecordRow[])
 const pointDefinitions = computed(() => ((profile.value.points as RecordRow | undefined)?.definitions || []) as RecordRow[])
+const metricPointOptions = computed(() => pointDefinitions.value.filter((item) => Number(item.enabled ?? 1) === 1))
+const metricPointGroupOptions = computed(() => [...new Set(metricPointOptions.value.map((item) => String(item.business_role || item.data_type || item.group_name || '未分组')).filter(Boolean))])
+const filteredMetricPointOptions = computed(() => {
+  const keyword = metricPointSearchKeyword.value.trim().toLowerCase()
+  return metricPointOptions.value.filter((item) => {
+    const group = String(item.business_role || item.data_type || item.group_name || '未分组')
+    if (metricPointGroupFilters.value.length && !metricPointGroupFilters.value.includes(group)) return false
+    if (!keyword) return true
+    return [item.point_name, item.point_code, item.unit, item.business_role, item.data_type, item.group_name]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+      .includes(keyword)
+  })
+})
+const selectedMetricPoints = computed(() => metricPointOptions.value.filter((item) => selectedMetricPointCodes.value.includes(metricPointCode(item))))
+const metricTemplateLabel = computed(() => metricTemplateId.value ? (metricTemplates.value.find((item) => String(item.id) === metricTemplateId.value)?.template_name || '已保存模板') : '全部测点')
+const metricTemplateChips = computed(() => metricTemplates.value.map((item) => ({ id: String(item.id || ''), label: String(item.template_name || '未命名模板') })))
+const historyRowsFallback = computed(() => {
+  const rows = recentHistory.value.length
+    ? recentHistory.value
+    : (profile.value.latestStats as RecordRow[] || [])
+  return rows.length ? rows : energyTrend.value
+})
+const historyDisplayRows = computed(() => {
+  if (periodHistoryChartRows.value.length) return periodHistoryChartRows.value
+  return historyRowsFallback.value.map((item) => ({
+    time: String(item.stat_period || item.stat_date || item.stat_month || item.stat_time || ''),
+    values: {
+      [String(item.point_code || item.pointCode || 'total_active_energy')]: item.usage_value ?? item.value ?? item.avg_value ?? 0,
+    },
+  })).filter((item) => item.time)
+})
+const historyDisplayKeys = computed(() => [...new Set(historyDisplayRows.value.flatMap((row) => Object.keys(row.values)))])
+const historyHasData = computed(() => historyDisplayRows.value.length > 0)
+const archiveHistoryChartRows = computed(() => historyDisplayRows.value)
+const alarmVisibleColumns = computed(() => alarmTableColumns.value.filter((column) => alarmColumnFilters.value.includes(column)))
+const filteredRecentAlarms = computed(() => {
+  const keyword = alarmSearchKeyword.value.trim().toLowerCase()
+  return recentAlarms.value.filter((row) => {
+    if (!alarmVisibleColumns.value.length) return false
+    if (!keyword) return true
+    return alarmVisibleColumns.value.some((column) => String(archiveFieldValue(column, row[column]) ?? '').toLowerCase().includes(keyword))
+  })
+})
+const detailAlarmStatusOptions = computed(() => [...new Set(recentAlarms.value.map((row) => String(row.deal_status || '').trim()).filter(Boolean))])
+const detailAlarmPage = ref(1)
+const detailAlarmPageCount = computed(() => Math.max(1, Math.ceil(filteredDetailAlarms.value.length / alarmPageSize)))
+const pagedDetailAlarms = computed(() => filteredDetailAlarms.value.slice((detailAlarmPage.value - 1) * alarmPageSize, detailAlarmPage.value * alarmPageSize))
+const filteredDetailAlarms = computed(() => {
+  const keyword = detailAlarmKeyword.value.trim().toLowerCase()
+  const status = detailAlarmStatusFilter.value
+  return recentAlarms.value.filter((row) => {
+    if (status && String(row.deal_status || '') !== status) return false
+    if (!keyword) return true
+    return [
+      row.alarm_time,
+      alarmTypeText(row.alarm_type),
+      alarmLevelText(row.alarm_level),
+      row.point_code,
+      dealStatusText(row.deal_status),
+      row.work_order_no,
+      workOrderStatusText(row.work_order_status),
+    ].filter(Boolean).join(' ').toLowerCase().includes(keyword)
+  })
+})
+const alarmPageCount = computed(() => Math.max(1, Math.ceil(filteredRecentAlarms.value.length / alarmPageSize)))
+const pagedRecentAlarms = computed(() => filteredRecentAlarms.value.slice((alarmPage.value - 1) * alarmPageSize, alarmPage.value * alarmPageSize))
+const alarmColumnOptions = computed(() => alarmTableColumns.value.map((column) => ({ key: column, label: column === 'work_order_no' ? '关联工单' : column === 'work_order_status' ? '工单状态' : column === 'work_order_priority' ? '工单优先级' : column === 'work_order_assignee' ? '处理人' : fieldLabel(column) })))
+const inspectionTypeOptions = computed(() => [...new Set(inspectionRecords.value.map((row) => String(row.command_type || '运维操作')).filter(Boolean))])
+const filteredInspectionRecords = computed(() => {
+  const keyword = inspectionSearchKeyword.value.trim().toLowerCase()
+  return inspectionRecords.value.filter((row) => {
+    const type = String(row.command_type || '运维操作')
+    const text = [type, row.target_sn, row.request_time, row.status, row.device_name, row.device_sn]
+      .filter(Boolean).join(' ').toLowerCase()
+    return (!keyword || text.includes(keyword)) && (!inspectionTypeFilter.value || type === inspectionTypeFilter.value)
+  })
+})
+const historyPeriod = computed(() => {
+  const anchor = new Date(`${historyAnchor.value}T00:00:00`)
+  const y = anchor.getFullYear()
+  const m = anchor.getMonth()
+  const d = anchor.getDate()
+  if (historyGranularity.value === 'total') return { start: '2000-01-01', end: formatDateInput(new Date()), label: '全部历史' }
+  if (historyGranularity.value === 'month') return { start: formatDateInput(new Date(y, m, 1)), end: formatDateInput(new Date(y, m + 1, 0)), label: `${y}年${m + 1}月` }
+  if (historyGranularity.value === 'year') return { start: `${y}-01-01`, end: `${y}-12-31`, label: `${y}年` }
+  if (historyGranularity.value === 'week') {
+    const day = anchor.getDay() || 7
+    const startDate = new Date(y, m, d - day + 1)
+    const endDate = new Date(y, m, d - day + 7)
+    return { start: formatDateInput(startDate), end: formatDateInput(endDate), label: `${formatDateInput(startDate)} 至 ${formatDateInput(endDate)}` }
+  }
+  return { start: historyAnchor.value, end: historyAnchor.value, label: historyAnchor.value }
+})
+const periodHistoryChartRows = computed(() => {
+  const rows = periodHistoryRows.value
+  const grouped = new Map<string, { time: string; values: Record<string, unknown> }>()
+  rows.forEach((row) => {
+    const point = String(row.point_code || row.pointCode || '总用量')
+    const time = historyGranularity.value === 'day'
+      ? String(row.stat_period || `${row.stat_date || ''} ${String(row.stat_hour ?? '').padStart(2, '0')}:00`).trim()
+      : String(row.stat_period || row.stat_date || row.stat_month || row.stat_year || '')
+    if (!grouped.has(time)) grouped.set(time, { time, values: {} })
+    grouped.get(time)!.values[point] = row.usage_value ?? row.value ?? row.avg_value ?? 0
+  })
+  return [...grouped.values()].sort((a, b) => a.time.localeCompare(b.time))
+})
+const periodHistorySeriesKeys = computed(() => [...new Set(periodHistoryChartRows.value.flatMap((row) => Object.keys(row.values)))])
+const billingStatCards = computed(() => [
+  ['可计费测点', `${pointDefinitions.value.filter((item) => Number(item.billable) === 1).length} 个`],
+  ['本期计量点数', `${periodHistoryRows.value.length} 条`],
+  ['本期累计用量', `${periodHistoryRows.value.reduce((sum, row) => sum + Number(row.usage_value ?? row.value ?? row.avg_value ?? 0), 0).toFixed(2)}`],
+  ['数据完整率', `${Number(detailDevice.value.quality_threshold_pct || 95).toFixed(0)}% 门槛`],
+])
 const pointMappings = computed(() => ((profile.value.points as RecordRow | undefined)?.mappings || []) as RecordRow[])
 const realtimeLookup = computed<Record<string, unknown>>(() => {
   const raw = profile.value.realtime
   if (raw && typeof raw === 'object' && Array.isArray((raw as RecordRow).points)) {
     return ((raw as RecordRow).points as RecordRow[]).reduce<Record<string, unknown>>((acc, item) => {
       const key = String(item.pointCode || item.point_code || '')
-      if (key) acc[key] = item.value
+      addRealtimeLookupValue(acc, key, item.value)
       return acc
     }, {})
   }
@@ -326,12 +500,12 @@ const realtimeLookup = computed<Record<string, unknown>>(() => {
       if (item && typeof item === 'object') {
         const row = item as RecordRow
         const key = String(row.point_code || row.pointCode || row.name || row.id || '')
-        if (key) acc[key] = row.value ?? row.usage_value ?? row.alarm_value ?? row.data_value ?? row.current_value ?? row.currentValue ?? row
+        addRealtimeLookupValue(acc, key, row.value ?? row.usage_value ?? row.alarm_value ?? row.data_value ?? row.current_value ?? row.currentValue ?? row)
       }
       return acc
     }, {})
   }
-  if (raw && typeof raw === 'object') return flattenRealtimePoints(raw as RecordRow)
+  if (raw && typeof raw === 'object') return withNormalizedRealtimeKeys(flattenRealtimePoints(raw as RecordRow))
   return {}
 })
 
@@ -369,17 +543,14 @@ const groupedHistoryColumns = computed(() => {
   groupedHistory.value.forEach((row) => Object.keys(row.values).forEach((key) => columns.add(key)))
   return [...columns]
 })
-const deviceRealtimeChartRows = computed(() => groupedHistoryOrdered.value.length ? groupedHistoryOrdered.value : energyTrend.value.map((item) => ({
-  time: String(item.stat_period || item.stat_date || ''),
-  values: { total_active_energy: item.usage_value ?? 0 },
+const deviceRealtimeChartRows = computed(() => realtimeMetricRows.value.map((item) => ({
+  time: String(item.stat_period || `${item.stat_date || ''} ${String(item.stat_hour ?? '').padStart(2, '0')}:00`),
+  values: { [String(item.point_code || item.pointCode || '总用量')]: item.value ?? item.usage_value ?? item.avg_value ?? 0 },
   sourceRows: [item],
 })))
-const deviceRealtimeSeriesKeys = computed(() => {
-  const keys = new Set<string>()
-  deviceRealtimeChartRows.value.forEach((row) => Object.keys(row.values).forEach((key) => keys.add(key)))
-  return [...keys]
-})
+const deviceRealtimeSeriesKeys = computed(() => [...new Set(deviceRealtimeChartRows.value.flatMap((row) => Object.keys(row.values)))])
 const deviceRealtimePointRows = computed(() => Object.entries(realtimeLookup.value)
+  .filter(([key]) => key === normalizePointCode(key))
   .map(([key, value]) => ({ key, value: Number(value) }))
   .filter((item) => Number.isFinite(item.value)))
 const overviewRealtimeRows = computed(() => realtimeSnapshots.value
@@ -391,17 +562,18 @@ const overviewRealtimeRows = computed(() => realtimeSnapshots.value
       value: values.length ? values.reduce((sum, value) => sum + value, 0) : 0,
     }
   })
-  .filter((item) => item.value > 0)
+  .filter((item) => item.name.length > 0)
   .slice(0, 12))
 const latestHistoryValues = computed(() => groupedHistory.value[0]?.values || {})
 const runtimeCards = computed(() => {
   const normalized = profile.value.realtime as RecordRow | undefined
   const reportedPoints = normalized && Array.isArray(normalized.points) ? normalized.points as RecordRow[] : []
   const latest = latestHistoryValues.value
-  if (pointDefinitions.value.length) {
-    return pointDefinitions.value.map((definition) => {
-      const code = String(definition.point_code || definition.pointCode || definition.code || '')
-      const reported = reportedPoints.find((point) => String(point.pointCode || point.point_code || '') === code)
+  const selectedDefinitions = selectedMetricPoints.value.length ? selectedMetricPoints.value : pointDefinitions.value
+  if (selectedDefinitions.length) {
+    return selectedDefinitions.map((definition) => {
+      const code = metricPointCode(definition)
+      const reported = reportedPoints.find((point) => normalizePointCode(point.pointCode || point.point_code || point.code || '') === code)
       return {
         code,
         name: String(definition?.point_name || definition?.pointName || code),
@@ -413,7 +585,7 @@ const runtimeCards = computed(() => {
   }
   if (reportedPoints.length) {
     return reportedPoints.map((point) => ({
-      code: String(point.pointCode || point.point_code || ''),
+      code: normalizePointCode(point.pointCode || point.point_code || point.code || ''),
       name: String(point.pointName || point.point_name || point.pointCode || ''),
       unit: String(point.unit || ''),
       role: String(point.businessRole || point.business_role || ''),
@@ -421,9 +593,10 @@ const runtimeCards = computed(() => {
     }))
   }
   return Object.keys(latest).map((code) => {
-    const definition = pointDefinitions.value.find((point) => String(point.point_code || point.pointCode || point.code || '') === code)
+    const normalizedCode = normalizePointCode(code)
+    const definition = pointDefinitions.value.find((point) => metricPointCode(point) === normalizedCode)
     return {
-      code,
+      code: normalizedCode,
       name: String(definition?.point_name || definition?.pointName || code || '测点'),
       unit: String(definition?.unit || ''),
       role: String(definition?.business_role || definition?.businessRole || ''),
@@ -454,9 +627,9 @@ const archiveSummaryCards = computed(() => {
   ]
   if (selectedIsDevice.value) return [
     ['测点数量', summary.pointCount ?? pointDefinitions.value.length],
-    ['历史记录', summary.historyCount ?? recentHistory.value.length],
-    ['近期告警', summary.alarmCount ?? recentAlarms.value.length],
-    ['指令记录', summary.commandCount ?? inspectionRecords.value.length],
+    ['计量记录', summary.historyCount ?? recentHistory.value.length],
+    ['待处理告警', summary.alarmCount ?? recentAlarms.value.length],
+    ['运维记录', summary.commandCount ?? inspectionRecords.value.length],
   ]
   if (selectedIsGateway.value) return [
     ['设备总数', summary.deviceCount ?? profile.value.deviceCount ?? '—'],
@@ -483,9 +656,9 @@ const archiveActionLinks = computed<ArchiveAction[]>(() => {
   const id = String(selectedNode.value.id)
   if (selectedIsDevice.value) return [
     archiveLink('实时监控', '/monitor/realtime', { deviceId: id }),
-    archiveLink('历史分析', '/analysis/history', { deviceId: id, pointCodes: defaultPointCodes.value, startTime: historyStart.value, endTime: historyEnd.value }),
-    archiveLink('告警中心', '/alarms/events', { deviceId: id }),
-    archiveLink('指令追踪', '/access/commands', { targetId: id }),
+    archiveLink('计量分析', '/analysis/history', { deviceId: id, pointCodes: defaultPointCodes.value, startTime: historyStart.value, endTime: historyEnd.value }),
+    archiveLink('告警处置', '/alarms/events', { deviceId: id }),
+    archiveLink('工单与指令', '/access/commands', { targetId: id }),
     archiveLink('设备控制', '/access/control', { targetId: id }),
   ]
   if (selectedIsGateway.value) return [
@@ -497,14 +670,14 @@ const archiveActionLinks = computed<ArchiveAction[]>(() => {
   return [
     archiveLink('告警中心', '/alarms/events', { orgId: id, includeChildren: 'true' }),
     archiveLink('告警处置', '/alarms/workbench', { orgId: id, includeChildren: 'true' }),
-    archiveLink('租户合同', '/billing/contracts', { orgId: id }),
-    archiveLink('账单中心', '/billing/bills', { orgId: id, includeChildren: 'true' }),
+    archiveLink('租户合同', '/billing/subjects', { view: 'contracts', orgId: id }),
+    archiveLink('账单中心', '/billing/receivables', { view: 'bills', orgId: id, includeChildren: 'true' }),
   ]
 })
 const bindableDevices = computed(() => bindingDevices.value.filter((device) => String(device.gateway_id || '') !== String(selectedNode.value?.id || '')))
 const viewToggleLabel = computed(() => dataView.value === 'chart' ? '图表' : '表格')
 const alarmTableColumns = computed(() => {
-  const preferred = ['alarm_time', 'org_name', 'device_name', 'device_sn', 'alarm_type', 'alarm_level', 'point_code', 'alarm_value', 'threshold_value', 'deal_status', 'deal_time', 'deal_user', 'deal_remark']
+  const preferred = ['alarm_time', 'device_name', 'alarm_type', 'alarm_level', 'point_code', 'alarm_value', 'threshold_value', 'deal_status', 'deal_time', 'work_order_no', 'work_order_status', 'work_order_priority', 'work_order_assignee']
   const keys = new Set<string>()
   preferred.forEach((key) => keys.add(key))
   recentAlarms.value.forEach((row) => Object.keys(row).forEach((key) => keys.add(key)))
@@ -512,7 +685,7 @@ const alarmTableColumns = computed(() => {
 })
 const hasDeviceRealtimeChart = computed(() => {
   if (!selectedIsDevice.value) return overviewRealtimeRows.value.length > 0 || energyTrend.value.length > 0
-  return deviceRealtimePointRows.value.length > 0 || deviceRealtimeChartRows.value.length > 0 || energyTrend.value.length > 0
+  return realtimeMetricRows.value.length > 0
 })
 
 const visibleTreeRows = computed<FlatNode[]>(() => {
@@ -622,10 +795,35 @@ function findNodeByKey(nodes: TreeNode[], key: string): TreeNode | null {
 }
 function realtimeValue(code: string) {
   const raw = realtimeLookup.value
+  const normalized = normalizePointCode(code)
+  if (Object.prototype.hasOwnProperty.call(raw, normalized)) return raw[normalized]
   if (Object.prototype.hasOwnProperty.call(raw, code)) return raw[code]
   const camel = code.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
+  const normalizedCamel = normalizePointCode(camel)
+  if (Object.prototype.hasOwnProperty.call(raw, normalizedCamel)) return raw[normalizedCamel]
   if (Object.prototype.hasOwnProperty.call(raw, camel)) return raw[camel]
   return '--'
+}
+function normalizePointCode(value: unknown) {
+  return String(value || '')
+    .trim()
+    .replace(/[-\s]+/g, '_')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/__+/g, '_')
+    .toUpperCase()
+}
+function addRealtimeLookupValue(target: Record<string, unknown>, key: unknown, value: unknown) {
+  const rawKey = String(key || '')
+  if (!rawKey) return
+  target[rawKey] = value
+  const normalized = normalizePointCode(rawKey)
+  if (normalized) target[normalized] = value
+}
+function withNormalizedRealtimeKeys(values: Record<string, unknown>) {
+  return Object.entries(values).reduce<Record<string, unknown>>((acc, [key, value]) => {
+    addRealtimeLookupValue(acc, key, value)
+    return acc
+  }, {})
 }
 function flattenRealtimePoints(raw: RecordRow) {
   const envelope = unwrapRealtimeEnvelope(raw)
@@ -700,6 +898,10 @@ function alarmLevelText(value: unknown) {
 function dealStatusText(value: unknown) {
   const map: Record<string, string> = { 0: '未处理', 1: '已处理', 2: '已忽略' }
   return map[String(value)] || (isMissingValue(value) ? '—' : String(value))
+}
+function workOrderStatusText(value: unknown) {
+  const map: Record<string, string> = { PENDING: '待派单', ASSIGNED: '已派单', ACCEPTED: '已接单', PROCESSING: '处理中', VERIFYING: '待验收', CLOSED: '已关闭', CANCELLED: '已取消' }
+  return map[String(value).toUpperCase()] || (isMissingValue(value) ? '未建单' : String(value))
 }
 function yesNoText(value: unknown) {
   const map: Record<string, string> = { 0: '否', 1: '是', true: '是', false: '否' }
@@ -867,49 +1069,96 @@ async function savePointDrafts() {
   await persistPointDrafts()
 }
 
+function openParsePreview() {
+  parsePreviewResult.value = null
+  parsePreviewPayload.value = JSON.stringify({
+    deviceSn: detailDevice.value.device_sn,
+    collectTime: Date.now(),
+    points: {},
+  }, null, 2)
+  parsePreviewDialog.value = true
+}
+
+async function runParsePreview() {
+  const deviceId = detailDevice.value.id || selectedNode.value?.id || route.params.id
+  if (!deviceId) return
+  parsePreviewBusy.value = true
+  try {
+    const source = JSON.parse(parsePreviewPayload.value) as RecordRow
+    const meters = Array.isArray(source.meters) ? source.meters as RecordRow[] : []
+    const meter = source.meter && typeof source.meter === 'object'
+      ? source.meter as RecordRow
+      : (meters.find((item) => String(item.deviceSn || item.device_sn || '') === String(detailDevice.value.device_sn || '')) || meters[0] || source)
+    if (!meter.deviceSn && !meter.device_sn) meter.deviceSn = String(detailDevice.value.device_sn || '')
+    parsePreviewResult.value = await parseDevicePayloadPreview({ deviceId: Number(deviceId), meter })
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '样例报文解析失败'
+  } finally {
+    parsePreviewBusy.value = false
+  }
+}
+
 async function selectNode(node: TreeNode) {
+  const selectionToken = ++selectionRequestToken.value
   selectedNode.value = node
+  sessionStorage.setItem(archiveSelectionStorageKey, nodeKey(node))
+  profile.value = {}
+  hourlyMetricRows.value = []
+  realtimeMetricRows.value = []
+  periodHistoryRows.value = []
+  metricRequestToken.value += 1
+  disposeArchiveCharts()
   profileLoading.value = true
+  error.value = ''
   try {
     if (node.nodeType === 'DEVICE') {
-      profile.value = await deviceArchiveProfile(node.id)
+      const nextProfile = await deviceArchiveProfile(node.id)
+      if (selectionToken !== selectionRequestToken.value) return
+      profile.value = nextProfile
       syncPointDrafts()
       syncAttributeDrafts()
+      await syncMetricSelection()
       activeArchiveTab.value = 'device'
-      bottomArchiveTab.value = 'history'
       dataView.value = 'chart'
+      await loadMetricView(selectionToken)
     } else if (node.nodeType === 'GATEWAY') {
-      profile.value = await gatewayArchiveProfile(node.id)
+      const nextProfile = await gatewayArchiveProfile(node.id)
+      if (selectionToken !== selectionRequestToken.value) return
+      profile.value = nextProfile
       pointDrafts.value = []
       pointEditor.value = null
       pointEditingKey.value = ''
       activeArchiveTab.value = 'device'
-      bottomArchiveTab.value = 'alarm'
       dataView.value = 'chart'
     } else if (node.nodeType === 'ORG') {
-      profile.value = await orgArchiveProfile(node.id)
+      const nextProfile = await orgArchiveProfile(node.id)
+      if (selectionToken !== selectionRequestToken.value) return
+      profile.value = nextProfile
       pointDrafts.value = []
       pointEditor.value = null
       pointEditingKey.value = ''
       activeArchiveTab.value = 'device'
-      bottomArchiveTab.value = 'alarm'
       dataView.value = 'chart'
+      await loadMetricView(selectionToken)
     } else {
+      if (selectionToken !== selectionRequestToken.value) return
       const deviceCount = nodeChildren(node).filter((item) => item.nodeType === 'DEVICE').length
       profile.value = node.nodeType === 'SPACE'
         ? { space: node, summary: { deviceCount } }
         : { group: node, summary: { deviceCount } }
       pointDrafts.value = []
       activeArchiveTab.value = 'device'
-      bottomArchiveTab.value = 'alarm'
       dataView.value = 'table'
     }
   } catch (e) {
+    if (selectionToken !== selectionRequestToken.value) return
     error.value = e instanceof Error ? e.message : '读取节点失败'
     profile.value = {}
   } finally {
-    profileLoading.value = false
-    await renderCharts()
+    if (selectionToken === selectionRequestToken.value) {
+      profileLoading.value = false
+      await renderCharts()
+    }
   }
 }
 
@@ -969,7 +1218,7 @@ function openDevice(gateway?: RecordRow, row?: RecordRow) {
     settlement_enabled: Number(row?.settlement_enabled ?? 0),
     meter_role: String(row?.meter_role || 'INTERNAL'),
     meter_factor: Number(row?.meter_factor || 1),
-    quality_gate_start_date: String(row?.quality_gate_start_date || formatDateInput(new Date())),
+    quality_gate_start_date: normalizeDateInput(row?.quality_gate_start_date),
     status: row?.status ?? 1,
   })
   editingGatewayId.value = row?.gateway_id ? String(row.gateway_id) : ''
@@ -977,6 +1226,16 @@ function openDevice(gateway?: RecordRow, row?: RecordRow) {
   selectedModelTreeKey.value = selectedOption?.model_version_id ? `VERSION:${selectedOption.model_version_id}` : ''
   selectedOrgTreeKey.value = form.org_id ? `ORG:${form.org_id}` : ''
   dialog.value = true
+}
+
+function openDiscoveredDeviceFromRoute() {
+  if (mode.value !== 'devices' || dialog.value || editingId.value || !route.query.discoveryId) return
+  const deviceSn = String(route.query.deviceSn || '').trim()
+  if (!deviceSn) return
+  openDevice()
+  form.device_sn = deviceSn
+  form.protocol_addr = String(route.query.protocolAddr || '').trim()
+  form.gateway_id = String(route.query.gatewayId || '').trim()
 }
 
 function selectDialogOrg(node: RecordRow) {
@@ -992,7 +1251,6 @@ function selectDialogOrg(node: RecordRow) {
   if (formType.value === 'org') form.parent_id = String(node.id)
   else {
     form.org_id = String(node.id)
-    if (formType.value === 'device' && !editingId.value) form.gateway_id = ''
     const gateway = gatewayOptions.value.find((item) => String(item.id) === String(form.gateway_id))
     if (gateway && String(gateway.org_id) !== String(form.org_id)) form.gateway_id = ''
   }
@@ -1199,7 +1457,28 @@ async function saveForm() {
       await updateDeviceContext(editingId.value, payload)
     }
     else if (editingId.value) await updateResource('archive', resource, editingId.value, payload)
-    else if (formType.value === 'device') await provisionDevice(payload)
+    else if (formType.value === 'device') {
+      const created = await provisionDevice(payload)
+      const discoveryId = String(route.query.discoveryId || '').trim()
+      if (discoveryId && created.id) {
+        await bindDiscoveredDevice(discoveryId, { deviceId: created.id, remark: '已通过设备档案登记并绑定' })
+        const rawLogId = String(route.query.rawLogId || '').trim()
+        const query = { ...route.query }
+        delete query.discoveryId
+        delete query.deviceSn
+        delete query.gatewayId
+        delete query.protocolAddr
+        delete query.rawLogId
+        await router.replace({ query })
+        if (rawLogId) {
+          try {
+            await replayAccessRawMessage(rawLogId)
+          } catch (e) {
+            error.value = `设备已建档并绑定，但样例报文重放失败：${e instanceof Error ? e.message : '请在接入监测页面手动重放'}`
+          }
+        }
+      }
+    }
     else await createResource('archive', resource, payload)
     dialog.value = false
     await loadAll()
@@ -1217,8 +1496,8 @@ function formPayload() {
       if (editingId.value) payload.gateway_id = null
       else delete payload.gateway_id
     }
-    // 空间仅保留历史数据兼容，不再由设备档案页面维护。
-    delete payload.space_id
+    // 设备所属空间是合同选表和空间能耗分析的基础关系，必须随设备档案保存。
+    if (!payload.space_id) payload.space_id = null
     if (!payload.install_time) delete payload.install_time
   }
   return payload
@@ -1228,24 +1507,23 @@ async function loadBindingDevices() {
   bindingLoading.value = true
   try {
     const page = await listResource('archive', 'devices', { pageSize: 500, keyword: bindingKeyword.value })
-    bindingDevices.value = page.records.map((item) => ({
-      ...item,
-      org_name: orgOptions.value.find((org) => String(org.id) === String(item.org_id))?.org_name,
-      gateway_name: gatewayOptions.value.find((gateway) => String(gateway.id) === String(item.gateway_id))?.gateway_name,
-      gateway_sn: gatewayOptions.value.find((gateway) => String(gateway.id) === String(item.gateway_id))?.gateway_sn,
-      type_name: typeOptions.value.find((type) => String(type.id) === String(item.device_type_id))?.type_name,
-    }))
+    bindingDevices.value = withDeviceLookupLabels(page.records, {
+      orgs: orgOptions.value,
+      gateways: gatewayOptions.value,
+      deviceTypes: typeOptions.value,
+    })
   } finally {
     bindingLoading.value = false
   }
 }
 
-async function openBindDevices() {
-  if (!selectedNode.value || selectedNode.value.nodeType !== 'GATEWAY') return
+function openBindDevices() {
+  if (!selectedNode.value || !['ORG', 'GATEWAY'].includes(selectedNode.value.nodeType)) return
+  bindingTarget.value = selectedNode.value
   bindingDeviceIds.value = []
   bindingKeyword.value = ''
   bindDialog.value = true
-  await loadBindingDevices()
+  void loadBindingDevices()
 }
 
 function toggleBindingDevice(id: unknown, checked: boolean) {
@@ -1254,16 +1532,23 @@ function toggleBindingDevice(id: unknown, checked: boolean) {
 }
 
 async function submitBindDevices() {
-  if (!selectedNode.value || selectedNode.value.nodeType !== 'GATEWAY') return
+  const target = bindingTarget.value
+  if (!target || !['ORG', 'GATEWAY'].includes(target.nodeType)) return
   if (!bindingDeviceIds.value.length) {
     error.value = '请选择需要绑定的设备'
     return
   }
   try {
-    await bindDevicesToGateway(selectedNode.value.id, bindingDeviceIds.value)
+    if (target.nodeType === 'GATEWAY') {
+      await bindDevicesToGateway(target.id, bindingDeviceIds.value)
+    } else {
+      await Promise.all(bindingDeviceIds.value.map(async (id) => {
+        await updateDeviceContext(id, { org_id: target.id, gateway_id: null })
+      }))
+    }
     bindDialog.value = false
     await loadAll()
-    const node = findNodeByKey(tree.value, nodeKey(selectedNode.value))
+    const node = findNodeByKey(tree.value, nodeKey(selectedNode.value as TreeNode))
     if (node) await selectNode(node)
   } catch (e) {
     error.value = e instanceof Error ? e.message : '绑定设备失败'
@@ -1271,18 +1556,20 @@ async function submitBindDevices() {
 }
 
 async function loadLookups() {
-  const [roots, orgs, gateways, types, publishedModels, productTree] = await Promise.all([
+  const [roots, orgs, gateways, types, spaces, publishedModels, productTree] = await Promise.all([
     rootOrgs(),
-    listResource('archive', 'orgs', { pageSize: 200 }),
-    listResource('archive', 'gateways', { pageSize: 200 }),
-    listResource('archive', 'device-types', { pageSize: 200 }),
+    resourceOptions('orgs'),
+    resourceOptions('gateways'),
+    resourceOptions('device-types'),
+    resourceOptions('spaces'),
     publishedModelOptions(),
     catalogTree(),
   ])
   rootOrgOptions.value = roots
-  orgOptions.value = orgs.records
-  gatewayOptions.value = gateways.records
-  typeOptions.value = types.records
+  orgOptions.value = orgs
+  gatewayOptions.value = gateways
+  typeOptions.value = types
+  spaceOptions.value = spaces
   modelOptions.value = publishedModels
   publishedCatalogTree.value = onlyPublishedModels(productTree)
   const firstRoot = roots[0]
@@ -1294,44 +1581,62 @@ async function loadLookups() {
 
 async function loadTree() {
   if (mode.value !== 'org-tree') return
+  const requestVersion = ++treeRequestVersion
   treeLoading.value = true
   try {
     const rows = await deviceTree({
       rootOrgId: selectedRootOrgId.value || undefined,
       keyword: treeKeyword.value || undefined,
     })
+    if (requestVersion !== treeRequestVersion) return
     tree.value = attachGatewayNodes(rows as TreeNode[])
     expandedKeys.value = treeKeyword.value ? collectExpanded(tree.value) : collectInitialExpanded(tree.value)
     const currentKey = selectedNode.value ? nodeKey(selectedNode.value) : ''
-    const nextSelected = currentKey ? findNodeByKey(tree.value, currentKey) : null
+    const rememberedKey = currentKey || sessionStorage.getItem(archiveSelectionStorageKey) || ''
+    const nextSelected = rememberedKey ? findNodeByKey(tree.value, rememberedKey) : null
     selectedNode.value = currentKey ? nextSelected : null
+    if (!currentKey && nextSelected) {
+      await selectNode(nextSelected)
+      return
+    }
     if (!selectedNode.value) profile.value = {}
     await renderCharts()
   } finally {
-    treeLoading.value = false
+    if (requestVersion === treeRequestVersion) treeLoading.value = false
+  }
+}
+
+async function loadTreeSkeleton() {
+  if (mode.value !== 'org-tree' || treeKeyword.value) return
+  const requestVersion = ++treeRequestVersion
+  treeLoading.value = true
+  try {
+    const rows = await deviceTree({
+      rootOrgId: selectedRootOrgId.value || undefined,
+      depth: 'org',
+    })
+    if (requestVersion !== treeRequestVersion) return
+    tree.value = attachGatewayNodes(rows as TreeNode[])
+    expandedKeys.value = collectInitialExpanded(tree.value)
+  } finally {
+    if (requestVersion === treeRequestVersion) treeLoading.value = false
   }
 }
 
 async function loadDevices() {
+  deviceListLoading.value = true
   const params = {
-    pageSize: 200,
+    pageSize: 500,
     keyword: deviceKeyword.value || undefined,
+    orgIds: deviceRootOrgIds.value.length ? deviceRootOrgIds.value.join(',') : undefined,
+    includeChildren: deviceRootOrgIds.value.length ? 'true' : undefined,
   }
-  const pages = deviceRootOrgIds.value.length
-    ? await Promise.all(deviceRootOrgIds.value.map((orgId) => listResource('archive', 'devices', { ...params, orgId, includeChildren: 'true' })))
-    : [await listResource('archive', 'devices', params)]
-  const unique = new Map<string, RecordRow>()
-  pages.flatMap((page) => page.records).forEach((item) => unique.set(String(item.id), item))
-  const selectedGateways = new Set(deviceGatewayIds.value)
-  devices.value = [...unique.values()]
-    .filter((item) => !selectedGateways.size || selectedGateways.has(String(item.gateway_id)))
-    .map((item) => ({
-    ...item,
-    org_name: orgOptions.value.find((org) => String(org.id) === String(item.org_id))?.org_name,
-    gateway_name: gatewayOptions.value.find((gateway) => String(gateway.id) === String(item.gateway_id))?.gateway_name,
-    gateway_sn: gatewayOptions.value.find((gateway) => String(gateway.id) === String(item.gateway_id))?.gateway_sn,
-    type_name: typeOptions.value.find((type) => String(type.id) === String(item.device_type_id))?.type_name,
-    }))
+  try {
+    const page = await deviceCards({ ...params, gatewayIds: deviceGatewayIds.value.join(',') || undefined })
+    devices.value = page.records
+  } finally {
+    deviceListLoading.value = false
+  }
 }
 
 function toggleDeviceRootOrg(id: unknown, checked: boolean) {
@@ -1353,12 +1658,188 @@ function toggleDetailFilter(kind: 'attribute' | 'point', value: string, checked:
   target.value = checked ? [...new Set([...target.value, value])] : target.value.filter((item) => item !== value)
 }
 
+function metricPointCode(item: RecordRow) {
+  return String(item.point_code || item.pointCode || item.code || '')
+}
+async function readMetricTemplates() {
+  try {
+    metricTemplates.value = await loadMetricTemplatesApi()
+  } catch {
+    metricTemplates.value = []
+  }
+}
+async function syncMetricSelection() {
+  await readMetricTemplates()
+  const available = metricPointOptions.value.map(metricPointCode).filter(Boolean)
+  const valid = selectedMetricPointCodes.value.filter((code) => available.includes(code))
+  selectedMetricPointCodes.value = valid.length ? valid : available
+  metricTemplateId.value = ''
+}
+function toggleMetricPointGroup(group: string, checked: boolean) {
+  metricPointGroupFilters.value = checked ? [...new Set([...metricPointGroupFilters.value, group])] : metricPointGroupFilters.value.filter((item) => item !== group)
+}
+function setAlarmColumnFilter(column: string, checked: boolean) {
+  alarmColumnFilters.value = checked ? [...new Set([...alarmColumnFilters.value, column])] : alarmColumnFilters.value.filter((item) => item !== column)
+  if (!alarmColumnFilters.value.length) alarmColumnFilters.value = ['alarm_time', 'device_name', 'alarm_type', 'alarm_level', 'point_code', 'deal_status', 'work_order_no', 'work_order_status']
+  alarmPage.value = 1
+}
+function selectMetricTemplate(id: string) {
+  if (!id) return
+  applyMetricTemplateById(id)
+}
+async function removeMetricTemplate(id: string) {
+  try { await deleteMetricTemplate(id) } catch (e) { error.value = e instanceof Error ? e.message : '模板删除失败'; return }
+  metricTemplates.value = metricTemplates.value.filter((item) => String(item.id) !== String(id))
+  if (metricTemplateId.value === String(id)) {
+    metricTemplateId.value = ''
+    await syncMetricSelection()
+  }
+}
+function applyMetricTemplate(template: RecordRow) {
+  const raw = template.point_codes ?? template.pointCodes ?? []
+  let codes: string[] = []
+  try { codes = Array.isArray(raw) ? raw.map(String) : JSON.parse(String(raw || '[]')) } catch { codes = [] }
+  selectedMetricPointCodes.value = codes.filter((code) => metricPointOptions.value.some((point) => metricPointCode(point) === code))
+  if (!selectedMetricPointCodes.value.length) selectedMetricPointCodes.value = metricPointOptions.value.map(metricPointCode).filter(Boolean)
+  metricTemplateId.value = String(template.id || '')
+  void loadMetricView()
+}
+function applyMetricTemplateById(value: unknown) {
+  applyMetricTemplate(metricTemplates.value.find((item) => String(item.id) === String(value)) || {})
+}
+async function saveMetricTemplate() {
+  const name = metricTemplateName.value.trim()
+  if (!name || !selectedMetricPointCodes.value.length) return
+  const next = await saveMetricTemplateApi({
+    template_name: name,
+    device_type_id: detailDevice.value.device_type_id,
+    point_codes: [...selectedMetricPointCodes.value],
+    org_id: detailDevice.value.org_id || selectedNode.value?.org_id,
+    all_points: 0,
+  }).catch((e) => { error.value = e instanceof Error ? e.message : '模板保存失败'; return null })
+  if (!next) return
+  metricTemplates.value = [next, ...metricTemplates.value.filter((item) => String(item.id) !== String(next.id))]
+  metricTemplateId.value = String(next.id)
+  metricTemplateName.value = ''
+  metricTemplateDialog.value = false
+}
+function setHistoryGranularity(value: HistoryGranularity) {
+  if (historyGranularity.value === value && !metricLoading.value) {
+    void loadMetricView()
+    return
+  }
+  historyGranularity.value = value
+  hourlyMetricRows.value = []
+  periodHistoryRows.value = []
+  void loadMetricView()
+}
+function shiftHistoryPeriod(delta: number) {
+  if (historyGranularity.value === 'total') return
+  const anchor = new Date(`${historyAnchor.value}T00:00:00`)
+  if (historyGranularity.value === 'day') anchor.setDate(anchor.getDate() + delta)
+  else if (historyGranularity.value === 'week') anchor.setDate(anchor.getDate() + delta * 7)
+  else if (historyGranularity.value === 'month') anchor.setMonth(anchor.getMonth() + delta)
+  else anchor.setFullYear(anchor.getFullYear() + delta)
+  historyAnchor.value = formatDateInput(anchor)
+  void loadMetricView()
+}
+function aggregateHistoryRows(rows: RecordRow[], granularity: HistoryGranularity = historyGranularity.value) {
+  const grouped = new Map<string, RecordRow>()
+  rows.forEach((row) => {
+    const point = String(row.point_code || row.pointCode || '总用量')
+    const rawValue = String(row.stat_date || row.stat_period || row.stat_month || row.stat_time || row.collect_time || '')
+    const rawDate = rawValue.slice(0, 10)
+    const parsed = rawDate ? new Date(`${rawDate}T00:00:00`) : null
+    let bucket = rawDate
+    if (granularity === 'year') bucket = rawValue.slice(0, 7)
+    else if (granularity === 'total') bucket = '总量'
+    if (!bucket || (parsed && Number.isNaN(parsed.getTime()))) return
+    const key = `${bucket}::${point}`
+    const current = grouped.get(key) || { stat_period: bucket, stat_date: bucket, point_code: point, usage_value: 0 }
+    current.usage_value = Number(current.usage_value || 0) + Number(row.usage_value ?? row.value ?? row.avg_value ?? 0)
+    grouped.set(key, current)
+  })
+  return [...grouped.values()]
+}
+function normalizeStatisticsRows(result: unknown): RecordRow[] {
+  if (Array.isArray(result)) return result as RecordRow[]
+  if (result && typeof result === 'object') {
+    const payload = result as RecordRow
+    if (Array.isArray(payload.records)) return payload.records as RecordRow[]
+    if (Array.isArray(payload.rows)) return payload.rows as RecordRow[]
+    if (Array.isArray(payload.data)) return payload.data as RecordRow[]
+  }
+  return []
+}
+async function loadMetricView(selectionToken?: number) {
+  const requestToken = ++metricRequestToken.value
+  const nodeKeyAtRequest = selectedNode.value ? nodeKey(selectedNode.value) : ''
+  const isCurrentSelection = () =>
+    requestToken === metricRequestToken.value &&
+    (!selectionToken || selectionToken === selectionRequestToken.value) &&
+    (!nodeKeyAtRequest || nodeKeyAtRequest === (selectedNode.value ? nodeKey(selectedNode.value) : ''))
+  const deviceId = detailDevice.value.id || selectedNode.value?.id || route.params.id
+  const orgId = selectedIsOrg.value ? selectedNode.value?.id : undefined
+  if ((!deviceId && !orgId) || (!selectedMetricPointCodes.value.length && !orgId)) {
+    if (isCurrentSelection()) {
+      hourlyMetricRows.value = []
+      realtimeMetricRows.value = []
+      periodHistoryRows.value = []
+    }
+    return
+  }
+  metricLoading.value = true
+  periodHistoryRows.value = []
+  const { start, end } = historyPeriod.value
+  const granularity = historyGranularity.value
+  try {
+    const historyPath = granularity === 'day'
+      ? 'hourly'
+      : granularity === 'year' || granularity === 'total'
+        ? 'monthly'
+        : 'daily/summary'
+    const queryRows = async (path: string, startDate: string, endDate: string) => [await statistics(path, orgId
+      ? { orgId, startDate, endDate }
+      : { deviceId, pointCodes: selectedMetricPointCodes.value.join(','), startDate, endDate })]
+    const realtimeStart = daysAgo(1)
+    const [responses, realtimeResponses] = await Promise.all([
+      queryRows(historyPath, start, end),
+      orgId ? Promise.resolve([]) : queryRows('hourly', realtimeStart, formatDateInput(new Date())).catch(() => []),
+    ])
+    if (!isCurrentSelection()) return
+    const rows = responses.flatMap(normalizeStatisticsRows)
+    const realtimeRows = realtimeResponses.flatMap(normalizeStatisticsRows)
+    hourlyMetricRows.value = rows
+      .map((row): RecordRow => ({ ...row, value: row.usage_value ?? row.avg_value ?? row.value }))
+      .sort((a: RecordRow, b: RecordRow) => String(a.stat_period || a.stat_date).localeCompare(String(b.stat_period || b.stat_date)))
+    realtimeMetricRows.value = realtimeRows
+      .map((row): RecordRow => ({ ...row, value: row.usage_value ?? row.avg_value ?? row.value }))
+      .sort((a: RecordRow, b: RecordRow) => String(a.stat_period || a.stat_date).localeCompare(String(b.stat_period || b.stat_date)))
+    periodHistoryRows.value = granularity === 'day' ? hourlyMetricRows.value : aggregateHistoryRows(hourlyMetricRows.value, granularity)
+  } catch (e) {
+    if (!isCurrentSelection()) return
+    error.value = e instanceof Error ? e.message : '设备计量趋势读取失败'
+    hourlyMetricRows.value = []
+    realtimeMetricRows.value = []
+    periodHistoryRows.value = []
+  } finally {
+    if (!isCurrentSelection()) return
+    metricLoading.value = false
+    await nextTick()
+    await renderCharts()
+  }
+}
+
 async function loadDetail() {
   const id = route.params.id
   if (!id) return
-  profile.value = await deviceArchiveProfile(id)
+  if (detailContextTimer) clearTimeout(detailContextTimer)
+  const requestVersion = ++detailRequestVersion
+  profile.value = await deviceProfile(id)
+  if (requestVersion !== detailRequestVersion) return
   syncPointDrafts()
   syncAttributeDrafts()
+  void syncMetricSelection().then(() => loadMetricView())
   const detail = profile.value as RecordRow & { device?: RecordRow }
   selectedNode.value = {
     id,
@@ -1370,21 +1851,66 @@ async function loadDetail() {
   } as TreeNode
   activeArchiveTab.value = 'device'
   detailWorkspaceTab.value = 'overview'
-  bottomArchiveTab.value = 'history'
   dataView.value = 'chart'
-  await renderCharts()
+  void renderCharts()
+  detailContextTimer = setTimeout(() => { void loadDetailContext(id, requestVersion) }, 700)
+}
+
+async function loadDetailContext(id: string | string[], requestVersion: number) {
+  try {
+    const fullProfile = await deviceArchiveProfile(id)
+    if (requestVersion !== detailRequestVersion) return
+    profile.value = fullProfile
+    syncPointDrafts()
+    syncAttributeDrafts()
+    await nextTick()
+    await renderCharts()
+  } catch {
+    // The primary detail and health workspace remain usable when deferred context fails.
+  }
+}
+
+async function toggleDeviceSettlement() {
+  const deviceId = detailDevice.value.id || route.params.id
+  if (!deviceId || settlementSwitching.value) return
+  const enabled = Number(detailDevice.value.settlement_enabled || 0) === 1
+  settlementSwitching.value = true
+  try {
+    await updateDeviceContext(deviceId, {
+      settlement_enabled: enabled ? 0 : 1,
+      meter_role: enabled ? (detailDevice.value.meter_role || 'INTERNAL') : 'SETTLEMENT',
+      meter_factor: Number(detailDevice.value.meter_factor || 1),
+      quality_gate_start_date: normalizeDateInput(detailDevice.value.quality_gate_start_date),
+    })
+    profile.value = await deviceArchiveProfile(deviceId)
+    await loadMetricView()
+    await nextTick()
+    await renderCharts()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '设备计费状态修改失败'
+  } finally {
+    settlementSwitching.value = false
+  }
 }
 
 async function loadAll() {
   loading.value = true
   error.value = ''
   try {
-    const lookupPromise = loadLookups()
-    if (mode.value === 'org-tree') await Promise.all([lookupPromise, loadTree()])
+    const lookupPromise = mode.value === 'org-tree' ? loadLookups() : null
+    if (mode.value === 'org-tree') {
+      await Promise.all([lookupPromise as Promise<void>, loadTreeSkeleton()])
+      await loadTree()
+    }
     else {
-      await lookupPromise
-      if (mode.value === 'devices') await loadDevices()
-      else await loadDetail()
+      if (mode.value === 'devices') {
+        await loadDevices()
+        void loadLookups()
+      } else {
+        await loadDetail()
+        void loadLookups()
+      }
+      openDiscoveredDeviceFromRoute()
     }
   } catch (e) {
     error.value = e instanceof Error ? e.message : '设备档案读取失败'
@@ -1419,6 +1945,7 @@ function cssVar(name: string, fallback: string) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
 }
 function lineOption(labels: string[], values: number[], name: string): EChartsCoreOption {
+  const { graphic } = chartRuntime as BasicChartRuntime
   const accent = cssVar('--accent', '#2f86ff')
   const muted = cssVar('--muted', '#758195')
   const border = cssVar('--border', '#dfe4ec')
@@ -1444,12 +1971,16 @@ function barOption(labels: string[], values: number[], name: string): EChartsCor
     series: [{ name, type: 'bar', barWidth: 18, data: values }],
   }
 }
+function chartHasSize(el: HTMLElement | null): el is HTMLElement {
+  return Boolean(el && el.isConnected && el.offsetWidth > 0 && el.offsetHeight > 0)
+}
 function ensureChartInstance(current: ECharts | null, el: HTMLElement) {
   if (current && current.getDom() === el) return current
   current?.dispose()
-  return init(el)
+  return (chartRuntime as BasicChartRuntime).init(el)
 }
 function multiLineOption(labels: string[], seriesKeys: string[], rows: Array<{ time: string; values: Record<string, unknown> }>): EChartsCoreOption {
+  const { graphic } = chartRuntime as BasicChartRuntime
   const muted = cssVar('--muted', '#758195')
   const border = cssVar('--border', '#dfe4ec')
   const palette = ['#2f86ff', '#13b8a6', '#f59e0b', '#ef4444', '#8b5cf6', '#0ea5e9', '#22c55e']
@@ -1473,6 +2004,7 @@ function multiLineOption(labels: string[], seriesKeys: string[], rows: Array<{ t
   }
 }
 async function renderCharts() {
+  chartRuntime ??= await loadBasicChartRuntime()
   const token = ++renderToken
   await waitForPaint()
   if (token !== renderToken) return
@@ -1482,22 +2014,13 @@ async function renderCharts() {
     const shouldRenderDeviceChart = selectedIsDevice.value || isDetail
     const chartEl = isDetail ? detailRealtimeChartEl.value : isDeviceTree ? deviceRealtimeChartEl.value : overviewRealtimeChartEl.value
     const chartRef = isDetail ? detailRealtimeChart : isDeviceTree ? deviceRealtimeChart : overviewRealtimeChart
-    if (chartEl) {
+    if (chartHasSize(chartEl)) {
       const chart = ensureChartInstance(chartRef, chartEl)
       if (isDetail) detailRealtimeChart = chart
       else if (isDeviceTree) deviceRealtimeChart = chart
       else overviewRealtimeChart = chart
       if (shouldRenderDeviceChart) {
-        if (deviceRealtimePointRows.value.length) {
-          chart.setOption(
-            barOption(
-              deviceRealtimePointRows.value.map((item) => item.key),
-              deviceRealtimePointRows.value.map((item) => item.value),
-              '当前值',
-            ),
-            true,
-          )
-        } else if (deviceRealtimeChartRows.value.length) {
+        if (deviceRealtimeChartRows.value.length) {
           const labels = deviceRealtimeChartRows.value.map((item) => item.time)
           const seriesKeys = deviceRealtimeSeriesKeys.value
           chart.setOption(
@@ -1535,27 +2058,43 @@ async function renderCharts() {
     detailRealtimeChart?.dispose()
     detailRealtimeChart = null
   }
-  if (selectedIsDevice.value && bottomArchiveTab.value === 'history' && dataView.value === 'chart' && historyChartEl.value) {
-    historyChart ||= init(historyChartEl.value)
-    const labels = groupedHistory.value.map((item) => item.time)
-    const values = groupedHistory.value.map((item) => Number(Object.values(item.values).reduce((sum, value) => Number(sum) + Number(value || 0), 0)))
-    historyChart.setOption(lineOption(labels, values, '历史用量'), true)
+  if (
+    (selectedIsDevice.value || selectedIsOrg.value) &&
+    activeArchiveTab.value === 'history' &&
+    dataView.value === 'chart' &&
+    chartHasSize(historyChartEl.value)
+  ) {
+    historyChart = ensureChartInstance(historyChart, historyChartEl.value)
+    const rows = archiveHistoryChartRows.value as Array<{ time: string; values: Record<string, unknown> }>
+    const labels = rows.map((item) => item.time)
+    const keys = historyDisplayKeys.value.length ? historyDisplayKeys.value : ['total_active_energy']
+    historyChart.clear()
+    historyChart.setOption(keys.length > 1 ? multiLineOption(labels, keys, rows) : lineOption(labels, rows.map((item) => Number(item.values[keys[0] || '总用量'] || 0)), '计量用量'), true)
     historyChart.resize()
   } else {
     historyChart?.dispose()
     historyChart = null
   }
-  if (bottomArchiveTab.value === 'alarm' && dataView.value === 'chart' && alarmChartEl.value) {
-    alarmChart ||= init(alarmChartEl.value)
-    const labels = alarmTrend.value.length ? alarmTrend.value.map((item) => String(item.alarm_date || item.stat_period || '')) : [...new Set(recentAlarms.value.map((item) => String(item.alarm_type || '告警')))]
-    const values = alarmTrend.value.length
-      ? alarmTrend.value.map((item) => Number(item.alarm_count || item.count || 0))
-      : labels.map((label) => recentAlarms.value.filter((item) => String(item.alarm_type || '告警') === label).length)
-    alarmChart.setOption(barOption(labels, values, '告警数量'), true)
-    alarmChart.resize()
+  alarmChart?.dispose()
+  alarmChart = null
+  if (mode.value === 'device-detail' && detailWorkspaceTab.value === 'billing' && chartHasSize(billingUsageChartEl.value)) {
+    billingUsageChart = ensureChartInstance(billingUsageChart, billingUsageChartEl.value)
+    const rows = periodHistoryChartRows.value
+    const labels = rows.map((item) => item.time)
+    const keys = historyDisplayKeys.value
+    billingUsageChart.setOption(keys.length > 1 ? multiLineOption(labels, keys, rows) : lineOption(labels, rows.map((item) => Number(item.values[keys[0] || '总用量'] || 0)), '计量用量'), true)
+    billingUsageChart.resize()
+    if (chartHasSize(billingQualityChartEl.value)) {
+      billingQualityChart = ensureChartInstance(billingQualityChart, billingQualityChartEl.value)
+      const qualityRows = hourlyMetricRows.value.filter((row) => row.data_complete_rate != null)
+      billingQualityChart.setOption(lineOption(qualityRows.map((row) => String(row.stat_period || row.stat_date || '')), qualityRows.map((row) => Number(row.data_complete_rate || 0)), '完整率'), true)
+      billingQualityChart.resize()
+    }
   } else {
-    alarmChart?.dispose()
-    alarmChart = null
+    billingUsageChart?.dispose()
+    billingUsageChart = null
+    billingQualityChart?.dispose()
+    billingQualityChart = null
   }
 }
 function resizeCharts() {
@@ -1564,6 +2103,8 @@ function resizeCharts() {
   detailRealtimeChart?.resize()
   historyChart?.resize()
   alarmChart?.resize()
+  billingUsageChart?.resize()
+  billingQualityChart?.resize()
 }
 function toggleDataView() {
   dataView.value = dataView.value === 'chart' ? 'table' : 'chart'
@@ -1593,24 +2134,33 @@ watch([selectedRootOrgId, treeKeyword], () => {
   }
   if (mode.value === 'org-tree') scheduleTreeQuery()
 })
-watch([activeArchiveTab, detailWorkspaceTab, bottomArchiveTab, dataView, () => profile.value], () => { void renderCharts() }, { deep: true })
-watch(bottomArchiveTab, (tab) => {
-  if (tab === 'history') dataView.value = 'chart'
+watch([detailAlarmKeyword, detailAlarmStatusFilter], () => { detailAlarmPage.value = 1 })
+watch([activeArchiveTab, detailWorkspaceTab, dataView], () => { void renderCharts() })
+watch(activeArchiveTab, (tab) => {
+  if (tab === 'history') {
+    dataView.value = 'chart'
+    void loadMetricView()
+  }
 })
 onMounted(() => { window.addEventListener('resize', resizeCharts); void loadAll() })
 onBeforeUnmount(() => {
   if (treeTimer) clearTimeout(treeTimer)
+  if (detailContextTimer) clearTimeout(detailContextTimer)
   window.removeEventListener('resize', resizeCharts)
   overviewRealtimeChart?.dispose()
   deviceRealtimeChart?.dispose()
   detailRealtimeChart?.dispose()
   historyChart?.dispose()
   alarmChart?.dispose()
+  billingUsageChart?.dispose()
+  billingQualityChart?.dispose()
   overviewRealtimeChart = null
   deviceRealtimeChart = null
   detailRealtimeChart = null
   historyChart = null
   alarmChart = null
+  billingUsageChart = null
+  billingQualityChart = null
 })
 </script>
 
@@ -1620,7 +2170,6 @@ onBeforeUnmount(() => {
       <div>
         <p class="eyebrow">DEVICE ARCHIVE</p>
         <h1>{{ title }}</h1>
-        <p>{{ mode === 'org-tree' ? '按组织层级查看设备档案，网关仅作为设备采集配置。' : mode === 'devices' ? '设备卡片档案。' : '设备档案详情。' }}</p>
       </div>
       <div class="head-actions">
         <button v-if="mode === 'device-detail'" class="quiet" @click="router.push('/device-archive/devices')">返回列表</button>
@@ -1631,10 +2180,10 @@ onBeforeUnmount(() => {
         <aside class="archive-sidebar-panel">
           <label class="archive-site-field">
             <span>站点名称</span>
-            <select v-model="selectedRootOrgId" :disabled="rootOrgSelectLocked">
+            <AppSelect v-model="selectedRootOrgId" :disabled="rootOrgSelectLocked">
               <option v-if="!rootOrgOptions.length" value="">暂无可选站点</option>
               <option v-for="org in rootOrgOptions" :key="String(org.id)" :value="String(org.id)">{{ org.org_name }}</option>
-            </select>
+            </AppSelect>
           </label>
           <div class="archive-search-row">
             <label class="archive-search-box">
@@ -1648,7 +2197,7 @@ onBeforeUnmount(() => {
             <button class="quiet" @click="collapseAll"><ChevronRight :size="15" />全折叠</button>
           </div>
           <div class="archive-tree-list">
-            <div v-if="treeLoading || loading" class="empty-state">正在读取组织档案...</div>
+            <AppLoadingState v-if="treeLoading && !visibleTreeRows.length" />
             <div v-else-if="!visibleTreeRows.length" class="empty-state">暂无组织档案。</div>
             <button
               v-for="entry in visibleTreeRows"
@@ -1671,8 +2220,9 @@ onBeforeUnmount(() => {
 
         <section class="archive-main-panel">
           <div class="archive-toolbar">
-            <div class="archive-toolbar-actions">
+              <div class="archive-toolbar-actions">
               <button v-if="showPrimaryCreate" class="primary add-action" @click="openAddBySelection">{{ createLabel }}</button>
+              <button v-if="selectedIsOrg || selectedIsGateway" class="quiet add-action bind-action" @click="openBindDevices">绑定设备</button>
               <button v-if="selectedIsOrg" class="quiet add-action" @click="openGatewayForSelectedOrg">+添加网关</button>
               <button class="icon-btn" :disabled="!selectedCanCopy" title="复制" aria-label="复制" @click="duplicateSelection"><Copy :size="16" /></button>
               <button class="icon-btn" :disabled="!selectedCanMutate" title="编辑" aria-label="编辑" @click="editSelected"><Pencil :size="16" /></button>
@@ -1696,16 +2246,18 @@ onBeforeUnmount(() => {
           <div class="archive-link-strip">
             <button v-for="link in archiveActionLinks" :key="link.path + link.label" class="quiet" @click="router.push({ path: link.path, query: link.query })">{{ link.label }}</button>
           </div>
-          <div v-if="selectedIsDevice" class="archive-tabs">
-            <button :class="{ active: activeArchiveTab === 'device' }" @click="activeArchiveTab = 'device'">设备信息</button>
-            <button :class="{ active: activeArchiveTab === 'inspection' }" @click="activeArchiveTab = 'inspection'">指令记录</button>
+          <div v-if="selectedIsDevice || selectedIsOrg" class="archive-tabs">
+            <button :class="{ active: activeArchiveTab === 'device' }" @click="activeArchiveTab = 'device'">基础档案</button>
             <button :class="{ active: activeArchiveTab === 'runtime' }" @click="activeArchiveTab = 'runtime'">实时运行数据</button>
+            <button :class="{ active: activeArchiveTab === 'history' }" @click="activeArchiveTab = 'history'">计量历史</button>
+            <button :class="{ active: activeArchiveTab === 'alarm' }" @click="activeArchiveTab = 'alarm'">告警与工单</button>
+            <button :class="{ active: activeArchiveTab === 'inspection' }" @click="activeArchiveTab = 'inspection'">运维记录</button>
           </div>
           <div v-else class="archive-tabs archive-tabs-static">
             <button class="active">{{ selectedIsGateway ? '网关概览' : selectedIsSpace ? '空间概览' : selectedIsGroup ? '状态分组' : '组织概览' }}</button>
           </div>
 
-          <div class="archive-runtime-grid">
+          <div v-if="(!selectedIsDevice && !selectedIsOrg) || ['device', 'inspection', 'runtime'].includes(activeArchiveTab)" class="archive-runtime-grid">
             <article class="archive-info-card">
               <div class="archive-section-title">
                 <i></i>
@@ -1728,10 +2280,27 @@ onBeforeUnmount(() => {
 
             <article class="archive-realtime-card">
               <template v-if="activeArchiveTab === 'device'">
-                <div class="archive-section-title">
+                <div class="archive-section-title archive-realtime-title">
                   <i></i>
                   <h3>{{ selectedIsDevice ? '实时数据' : '运行概览' }}</h3>
+                  <div v-if="selectedIsDevice" class="archive-chart-actions">
+                    <button class="quiet" type="button" @click="metricTemplateDialog = true">配置测点</button>
+                  </div>
                   <button class="icon-btn" title="刷新" aria-label="刷新" @click="refreshSelected"><RefreshCw :size="16" /></button>
+                </div>
+                <div v-if="selectedIsDevice" class="archive-template-strip archive-template-strip--row">
+                  <button
+                    v-for="chip in metricTemplateChips"
+                    :key="chip.id || chip.label"
+                    class="archive-template-chip"
+                    :class="{ active: metricTemplateId === chip.id }"
+                    type="button"
+                    @click="selectMetricTemplate(chip.id)"
+                  >
+                    <span>{{ chip.label }}</span>
+                    <X :size="12" @click.stop.prevent="removeMetricTemplate(chip.id)" />
+                  </button>
+                  <span v-if="!metricTemplateChips.length" class="archive-template-empty">暂无已配置模板</span>
                 </div>
                 <div class="archive-card-scroll">
                   <template v-if="!selectedIsDevice">
@@ -1742,15 +2311,16 @@ onBeforeUnmount(() => {
                       </article>
                     </div>
                     <div class="archive-chart-shell">
-                      <div v-show="hasDeviceRealtimeChart" ref="overviewRealtimeChartEl" class="archive-trend-chart"></div>
+                      <div v-if="hasDeviceRealtimeChart" ref="overviewRealtimeChartEl" class="archive-trend-chart"></div>
                       <div v-if="!hasDeviceRealtimeChart" class="archive-no-data">暂无能耗趋势数据。</div>
                     </div>
                   </template>
                   <template v-else>
-                    <div v-if="profileLoading" class="archive-no-data">正在读取实时数据...</div>
+                    <AppLoadingState v-if="profileLoading" class="archive-no-data" />
                     <div v-else class="archive-chart-shell">
-                      <div v-show="hasDeviceRealtimeChart" ref="deviceRealtimeChartEl" class="archive-trend-chart"></div>
-                      <div v-if="!hasDeviceRealtimeChart" class="archive-no-data">暂无实时运行曲线。</div>
+                      <div v-if="metricLoading" class="archive-chart-loading">正在读取小时计量数据…</div>
+                      <div v-if="hasDeviceRealtimeChart" ref="deviceRealtimeChartEl" class="archive-trend-chart"></div>
+                      <div v-if="!hasDeviceRealtimeChart && !metricLoading" class="archive-no-data">最近24小时无数据。</div>
                     </div>
                   </template>
                 </div>
@@ -1759,14 +2329,24 @@ onBeforeUnmount(() => {
               <template v-else-if="activeArchiveTab === 'inspection'">
                 <div class="archive-section-title">
                   <i></i>
-                  <h3>指令记录</h3>
-                  <small>设备操作记录</small>
+                  <h3>运维记录</h3>
+                  <small>工单、指令与操作留痕</small>
+                </div>
+                <div class="archive-record-toolbar">
+                  <label class="archive-search-box archive-record-search">
+                    <Search :size="14" />
+                    <input v-model.trim="inspectionSearchKeyword" placeholder="检索运维记录">
+                  </label>
+                  <select v-model="inspectionTypeFilter" class="archive-record-filter" aria-label="运维分类过滤">
+                    <option value="">全部分类</option>
+                    <option v-for="item in inspectionTypeOptions" :key="item" :value="item">{{ item }}</option>
+                  </select>
                 </div>
                 <div class="archive-card-scroll">
-                  <div v-if="!inspectionRecords.length" class="archive-no-data">暂无指令记录。</div>
+                  <div v-if="!filteredInspectionRecords.length" class="archive-no-data">{{ inspectionRecords.length ? '当前筛选条件没有匹配记录。' : '暂无运维记录。' }}</div>
                   <div v-else class="archive-inspection-list">
-                    <div v-for="row in inspectionRecords" :key="String(row.id)">
-                      <b>{{ row.command_type || '指令记录' }}</b>
+                    <div v-for="row in filteredInspectionRecords" :key="String(row.id)">
+                      <b>{{ row.command_type || '运维操作' }}</b>
                       <span>{{ row.target_sn || row.request_time || '—' }}</span>
                       <small>{{ row.status ?? '—' }}</small>
                     </div>
@@ -1774,7 +2354,7 @@ onBeforeUnmount(() => {
                 </div>
               </template>
 
-              <template v-else>
+              <template v-else-if="activeArchiveTab === 'runtime'">
                 <div class="archive-section-title">
                   <i></i>
                   <h3>实时运行数据</h3>
@@ -1794,61 +2374,71 @@ onBeforeUnmount(() => {
             </article>
           </div>
 
-          <div class="archive-history-panel">
-            <div class="archive-history-tabs">
-              <button v-if="selectedIsDevice" :class="{ active: bottomArchiveTab === 'history' }" @click="bottomArchiveTab = 'history'">历史数据</button>
-              <button :class="{ active: bottomArchiveTab === 'alarm' }" @click="bottomArchiveTab = 'alarm'">报警数据</button>
-            </div>
-            <div class="archive-query-row">
-              <template v-if="selectedIsDevice && bottomArchiveTab === 'history'">
-                <label>开始时间 <input v-model="historyStart" type="date"></label>
-                <label>结束时间 <input v-model="historyEnd" type="date"></label>
-                <label>时间间隔 <select v-model="historyInterval"><option>五分钟</option><option>十五分钟</option><option>一小时</option><option>一天</option></select></label>
-                <label>参数 <input v-model="historyParam" placeholder="名称/编码"></label>
+          <div v-else-if="(selectedIsDevice || selectedIsOrg) && ['history', 'alarm'].includes(activeArchiveTab)" class="archive-history-panel archive-device-data-panel">
+            <div class="archive-section-title"><i></i><h3>{{ activeArchiveTab === 'history' ? '计量历史' : '告警与工单' }}</h3><small>{{ activeArchiveTab === 'history' ? '设备测点历史趋势' : '告警事件与处置上下文' }}</small></div>
+            <div class="archive-query-row history-toolbar-row">
+              <template v-if="activeArchiveTab === 'history'">
+                <div class="history-period-tabs">
+                  <button v-for="item in [{ key: 'day', label: '日' }, { key: 'week', label: '周' }, { key: 'month', label: '月' }, { key: 'year', label: '年' }, { key: 'total', label: '总' }]" :key="item.key" type="button" :class="{ active: historyGranularity === item.key }" @click="setHistoryGranularity(item.key as HistoryGranularity)">{{ item.label }}</button>
+                </div>
+                <button v-if="historyGranularity !== 'total'" class="quiet archive-period-arrow" type="button" title="上一周期" @click="shiftHistoryPeriod(-1)">‹</button>
+                <strong class="archive-period-label">{{ historyPeriod.label }}</strong>
+                <button v-if="historyGranularity !== 'total'" class="quiet archive-period-arrow" type="button" title="下一周期" @click="shiftHistoryPeriod(1)">›</button>
               </template>
-              <button
-                class="quiet archive-view-toggle"
-                :class="{ active: dataView === 'table' }"
-                :title="viewToggleLabel"
-                :aria-label="viewToggleLabel"
-                @click="toggleDataView"
-              >
-                <BarChart3 v-if="dataView === 'table'" :size="16" />
-                <FileText v-else :size="16" />
-                {{ viewToggleLabel }}
-              </button>
-              <button class="icon-btn" title="刷新" aria-label="刷新" @click="refreshSelected"><RefreshCw :size="16" /></button>
+              <button class="icon-btn" title="刷新" aria-label="刷新" @click="activeArchiveTab === 'history' ? loadMetricView() : refreshSelected()"><RefreshCw :size="16" /></button>
             </div>
 
-      <div v-if="selectedIsDevice && bottomArchiveTab === 'history'">
-              <div class="archive-chart-shell">
-                <div v-show="dataView === 'chart'" ref="historyChartEl" class="archive-history-chart"></div>
-                <div v-if="dataView === 'table'" class="archive-data-table archive-scroll-table">
-                  <div v-if="!groupedHistory.length" class="archive-no-data">暂无历史数据。</div>
-                  <div v-for="row in groupedHistory" :key="row.time" class="archive-history-row">
-                    <div class="archive-history-time">{{ row.time }}</div>
-                    <div class="archive-history-grid">
-                      <span v-for="column in groupedHistoryColumns" :key="column">
-                        <b>{{ column }}</b>
-                        <small>{{ displayValue(row.values[column]) }}</small>
-                      </span>
+            <div v-if="activeArchiveTab === 'history'" class="archive-device-data-body archive-device-data-body--full">
+              <div class="archive-chart-shell archive-history-shell">
+                <AppLoadingState v-if="metricLoading" class="archive-history-loading" />
+                <div v-else-if="!historyHasData" class="archive-no-data archive-history-empty">当前周期没有可展示的数据。</div>
+                <div v-else class="archive-history-content">
+                  <div v-if="dataView === 'chart'" ref="historyChartEl" class="archive-history-chart"></div>
+                  <div v-if="dataView === 'table'" class="archive-data-table archive-scroll-table">
+                    <div v-if="!historyDisplayRows.length" class="archive-no-data">暂无计量历史。</div>
+                    <div v-for="row in historyDisplayRows" :key="row.time" class="archive-history-row">
+                      <div class="archive-history-time">{{ row.time }}</div>
+                      <div class="archive-history-grid">
+                        <span v-for="column in historyDisplayKeys" :key="column">
+                          <b>{{ column }}</b>
+                          <small>{{ displayValue(row.values[column]) }}</small>
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div v-if="bottomArchiveTab === 'alarm'">
-              <div class="archive-chart-shell">
-                <div v-show="dataView === 'chart'" ref="alarmChartEl" class="archive-history-chart"></div>
-                <div v-if="dataView === 'table'" class="archive-data-table archive-scroll-table archive-full-table">
-                  <div v-if="!recentAlarms.length" class="archive-no-data">暂无报警数据。</div>
-                  <div v-else class="archive-full-table-head">
-                    <span v-for="column in alarmTableColumns" :key="column">{{ fieldLabel(column) }}</span>
-                  </div>
-                  <div v-for="row in recentAlarms" :key="String(row.id)" class="archive-full-table-row">
-                    <span v-for="column in alarmTableColumns" :key="column">{{ archiveFieldValue(column, row[column]) }}</span>
-                  </div>
+            <div v-else class="archive-device-data-body archive-device-data-body--full">
+              <div class="archive-data-table archive-scroll-table archive-full-table">
+                <div class="archive-table-headbar">
+                  <label class="archive-search-box archive-table-search">
+                    <Search :size="15" />
+                    <input v-model.trim="alarmSearchKeyword" placeholder="搜索表内内容">
+                  </label>
+                  <details class="detail-filter-menu archive-column-filter-menu">
+                    <summary>列过滤 · {{ alarmVisibleColumns.length }} 项<ChevronDown :size="14" /></summary>
+                    <div>
+                      <label v-for="column in alarmColumnOptions" :key="column.key">
+                        <input type="checkbox" :checked="alarmColumnFilters.includes(column.key)" @change="setAlarmColumnFilter(column.key, ($event.target as HTMLInputElement).checked)">
+                        <span>{{ column.label }}</span>
+                      </label>
+                    </div>
+                  </details>
+                </div>
+                <div v-if="!pagedRecentAlarms.length" class="archive-no-data">暂无告警与处置记录。</div>
+                <div v-else class="archive-full-table-head">
+                  <span v-for="column in alarmVisibleColumns" :key="column">{{ alarmColumnOptions.find((item) => item.key === column)?.label || fieldLabel(column) }}</span>
+                </div>
+                <div v-for="row in pagedRecentAlarms" :key="String(row.id)" class="archive-full-table-row">
+                  <span v-for="column in alarmVisibleColumns" :key="column">{{ column === 'alarm_type' ? alarmTypeText(row[column]) : column === 'alarm_level' ? alarmLevelText(row[column]) : column === 'deal_status' ? dealStatusText(row[column]) : column === 'work_order_status' ? workOrderStatusText(row[column]) : archiveFieldValue(column, row[column]) }}</span>
+                </div>
+                <div v-if="filteredRecentAlarms.length" class="table-pagination archive-table-pagination">
+                  <span>共 {{ filteredRecentAlarms.length }} 条</span>
+                  <button class="quiet" :disabled="alarmPage <= 1" @click="alarmPage = Math.max(1, alarmPage - 1)">上一页</button>
+                  <button v-for="item in Array.from({ length: Math.min(5, alarmPageCount) }, (_, index) => Math.max(1, Math.min(alarmPageCount, alarmPage - 2 + index)))" :key="item" class="page-number" :class="{ active: item === alarmPage }" @click="alarmPage = item">{{ item }}</button>
+                  <button class="quiet" :disabled="alarmPage >= alarmPageCount" @click="alarmPage = Math.min(alarmPageCount, alarmPage + 1)">下一页</button>
                 </div>
               </div>
             </div>
@@ -1882,13 +2472,13 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </article>
-      <div v-if="loading" class="empty-state">正在读取设备档案...</div>
+      <AppLoadingState v-if="deviceListLoading && !devices.length" />
       <div v-else class="device-card-grid">
         <article v-for="item in devices" :key="String(item.id)" class="device-card">
-          <div class="device-card-media"><img :src="meterImage" alt="电表设备"></div>
+          <AppImage class="device-card-media" :eager="devices.indexOf(item) < 6" :src="item.model_image_url || item.model_image_object_key || item.catalog_model_image_object_key" :alt="String(item.device_name || item.device_sn || '设备图片')" empty-text="型号暂未配置图片" @retry="loadDevices" />
           <div class="device-card-info">
             <h3>{{ item.device_name || item.device_sn }}</h3>
-            <p>{{ item.device_sn }} · {{ item.type_name || '设备' }}</p>
+            <p>{{ item.device_sn }} · {{ item.model_display_name || item.type_name || '设备' }}</p>
             <p>{{ item.org_name || '未分配组织' }} / {{ item.gateway_name || item.gateway_sn || '未绑定网关' }}</p>
           </div>
           <div class="device-card-actions">
@@ -1903,7 +2493,7 @@ onBeforeUnmount(() => {
     <template v-else>
       <div class="device-detail-layout">
         <aside class="device-detail-left">
-          <img :src="meterImage" alt="电表设备">
+          <AppImage class="device-detail-image" eager :src="detailDevice.model_image_url || detailDevice.catalog_model_image_url || detailDevice.model_image_object_key || detailDevice.catalog_model_image_object_key" :alt="String(detailDevice.device_name || detailDevice.device_sn || '设备图片')" empty-text="型号图片暂不可用" @retry="loadDetail" />
           <dl class="detail-grid">
             <dt>设备名称</dt><dd>{{ detailDevice.device_name || '—' }}</dd>
             <dt>设备编号</dt><dd>{{ detailDevice.device_sn || '—' }}</dd>
@@ -1921,15 +2511,15 @@ onBeforeUnmount(() => {
           <article class="panel device-workspace-panel">
             <div class="panel-head device-workspace-head">
               <div>
-                <h3>{{ detailWorkspaceTab === 'overview' ? '设备运行工作区' : detailWorkspaceTab === 'alarms' ? '告警与运维上下文' : detailWorkspaceTab === 'billing' ? '结算与账单上下文' : detailWorkspaceTab === 'attributes' ? '属性查看' : '测点查看' }}</h3>
+                <h3>{{ detailWorkspaceTab === 'overview' ? '设备健康工作区' : detailWorkspaceTab === 'alarms' ? '告警与工单上下文' : detailWorkspaceTab === 'billing' ? '计量与结算上下文' : detailWorkspaceTab === 'attributes' ? '属性配置' : '测点配置' }}</h3>
                 <small>{{ detailDevice.type_name || detailDevice.type_code || '设备类型/型号' }}</small>
               </div>
               <div class="device-workspace-tabs">
-                <button class="quiet" :class="{ active: detailWorkspaceTab === 'overview' }" @click="detailWorkspaceTab = 'overview'">运行总览</button>
-                <button class="quiet" :class="{ active: detailWorkspaceTab === 'alarms' }" @click="detailWorkspaceTab = 'alarms'">告警与运维</button>
-                <button class="quiet" :class="{ active: detailWorkspaceTab === 'billing' }" @click="detailWorkspaceTab = 'billing'">结算与账单</button>
-                <button class="quiet" :class="{ active: detailWorkspaceTab === 'attributes' }" @click="detailWorkspaceTab = 'attributes'">属性查看</button>
-                <button class="quiet" :class="{ active: detailWorkspaceTab === 'points' }" @click="detailWorkspaceTab = 'points'">测点查看</button>
+                <button class="quiet" :class="{ active: detailWorkspaceTab === 'overview' }" @click="detailWorkspaceTab = 'overview'">设备健康</button>
+                <button class="quiet" :class="{ active: detailWorkspaceTab === 'alarms' }" @click="detailWorkspaceTab = 'alarms'">告警与工单</button>
+                <button class="quiet" :class="{ active: detailWorkspaceTab === 'billing' }" @click="detailWorkspaceTab = 'billing'">计量与结算</button>
+                <button class="quiet" :class="{ active: detailWorkspaceTab === 'attributes' }" @click="detailWorkspaceTab = 'attributes'">属性配置</button>
+                <button class="quiet" :class="{ active: detailWorkspaceTab === 'points' }" @click="detailWorkspaceTab = 'points'">测点配置</button>
                 <button class="icon-btn danger-text" title="删除设备" aria-label="删除设备" @click="deleteSelected"><Trash2 :size="16" /></button>
               </div>
             </div>
@@ -1941,17 +2531,17 @@ onBeforeUnmount(() => {
                   <div ref="detailRealtimeChartEl" class="device-energy-chart"></div>
                 </section>
                 <section class="device-workspace-list">
-                  <div class="archive-section-title"><i></i><h3>最近历史数据</h3><small>日统计</small></div>
+                  <div class="archive-section-title"><i></i><h3>最近计量</h3><small>日统计</small></div>
                   <div class="compact-list">
                     <div v-for="row in recentHistory" :key="String(row.id || `${row.stat_date}-${row.point_code}`)">
                       <b>{{ row.point_code }} · {{ row.usage_value ?? '—' }}</b>
                       <span>{{ row.stat_date }} / 完整率 {{ row.data_complete_rate ?? '—' }}%</span>
                     </div>
-                    <div v-if="!recentHistory.length"><b>暂无历史数据</b><span>日统计写入后将在此展示。</span></div>
+                    <div v-if="!recentHistory.length"><b>暂无计量记录</b><span>日统计写入后将在此展示。</span></div>
                   </div>
                 </section>
                 <section class="device-workspace-list">
-                  <div class="archive-section-title"><i></i><h3>最近告警数据</h3><small>告警事件</small></div>
+                  <div class="archive-section-title"><i></i><h3>最近告警</h3><small>告警事件</small></div>
                   <div class="compact-list">
                     <div v-for="row in recentAlarms" :key="String(row.id)">
                       <b>{{ alarmTypeText(row.alarm_type) }} · {{ alarmLevelText(row.alarm_level) }}</b>
@@ -1964,16 +2554,39 @@ onBeforeUnmount(() => {
             </template>
 
             <template v-else-if="detailWorkspaceTab === 'alarms'">
-              <div class="device-context-grid">
-                <section class="device-context-card alert-context-card"><div class="archive-section-title"><i></i><h3>近期告警</h3><small>{{ recentAlarms.length }} 条</small></div><div class="compact-list"><div v-for="row in recentAlarms" :key="String(row.id)"><b>{{ alarmTypeText(row.alarm_type) }} · {{ alarmLevelText(row.alarm_level) }}</b><span>{{ row.point_code || '—' }} / {{ row.alarm_time || '—' }}</span></div><div v-if="!recentAlarms.length"><b>暂无近期告警</b><span>当前设备暂无待处理异常。</span></div></div></section>
-                <section class="device-context-card"><div class="archive-section-title"><i></i><h3>下一步处置</h3><small>按设备上下文跳转</small></div><p>告警发生后，可先查看实时数据，再转为工单跟踪处理过程。</p><div class="device-context-actions"><button class="primary" @click="router.push({ path: '/alarms/workbench', query: { deviceId: String(detailDevice.id || route.params.id) } })">进入告警处置</button><button class="quiet" @click="router.push({ path: '/operations/work-orders', query: { deviceId: String(detailDevice.id || route.params.id) } })">查看关联工单</button><button class="quiet" @click="router.push({ path: '/access/commands', query: { targetId: String(detailDevice.id || route.params.id) } })">查看控制记录</button></div></section>
+              <div class="device-context-grid device-context-grid--single">
+                <section class="device-context-card device-context-table-card">
+                  <div class="archive-section-title"><i></i><h3>告警历史与关联工单</h3><small>{{ filteredDetailAlarms.length }} 条</small></div>
+                  <div class="detail-view-filters device-alarm-filters">
+                    <label class="detail-filter-search"><Search :size="14" /><input v-model.trim="detailAlarmKeyword" placeholder="搜索告警类型、测点、工单或状态"></label>
+                    <select v-model="detailAlarmStatusFilter" class="detail-filter-select" aria-label="告警状态筛选">
+                      <option value="">全部告警状态</option>
+                      <option v-for="status in detailAlarmStatusOptions" :key="status" :value="status">{{ dealStatusText(status) }}</option>
+                    </select>
+                  </div>
+                  <div class="archive-data-table archive-scroll-table archive-full-table">
+                    <div v-if="!filteredDetailAlarms.length" class="archive-no-data">{{ recentAlarms.length ? '当前筛选条件没有匹配记录。' : '暂无告警与处置记录。' }}</div>
+                    <template v-else>
+                      <div class="archive-full-table-head"><span>发生时间</span><span>告警类型</span><span>级别</span><span>测点</span><span>告警状态</span><span>关联工单</span><span>工单状态</span></div>
+                      <div v-for="row in pagedDetailAlarms" :key="String(row.id)" class="archive-full-table-row"><span>{{ row.alarm_time || '—' }}</span><span>{{ alarmTypeText(row.alarm_type) }}</span><span>{{ alarmLevelText(row.alarm_level) }}</span><span>{{ row.point_code || '—' }}</span><span>{{ dealStatusText(row.deal_status) }}</span><span>{{ row.work_order_no || '未建单' }}</span><span>{{ workOrderStatusText(row.work_order_status) }}</span></div>
+                      <div class="table-pagination archive-table-pagination">
+                        <span>共 {{ filteredDetailAlarms.length }} 条</span>
+                        <button class="quiet" :disabled="detailAlarmPage <= 1" @click="detailAlarmPage = Math.max(1, detailAlarmPage - 1)">上一页</button>
+                        <button v-for="item in Array.from({ length: Math.min(5, detailAlarmPageCount) }, (_, index) => Math.max(1, Math.min(detailAlarmPageCount, detailAlarmPage - 2 + index)))" :key="item" class="page-number" :class="{ active: item === detailAlarmPage }" @click="detailAlarmPage = item">{{ item }}</button>
+                        <button class="quiet" :disabled="detailAlarmPage >= detailAlarmPageCount" @click="detailAlarmPage = Math.min(detailAlarmPageCount, detailAlarmPage + 1)">下一页</button>
+                      </div>
+                    </template>
+                  </div>
+                </section>
               </div>
             </template>
 
             <template v-else-if="detailWorkspaceTab === 'billing'">
-              <div class="device-context-grid">
-                <section class="device-context-card"><div class="archive-section-title"><i></i><h3>结算准备度</h3><small>以采集质量为准</small></div><dl class="device-context-facts"><dt>可计费测点</dt><dd>{{ pointDefinitions.filter(item => Number(item.billable) === 1).length }} 个</dd><dt>结算完整率阈值</dt><dd>{{ detailDevice.quality_threshold_pct || 95 }}%</dd><dt>最近统计记录</dt><dd>{{ recentHistory.length }} 条</dd></dl></section>
-                <section class="device-context-card"><div class="archive-section-title"><i></i><h3>进入结算流程</h3><small>不在设备页直接改账</small></div><p>账单由合同、计费规则和质量通过的日统计共同生成。需要调整表计时，请先走计量变更流程。</p><div class="device-context-actions"><button class="primary" @click="router.push('/billing/settlement')">打开结算工作台</button><button class="quiet" @click="router.push('/billing/metering')">计量变更</button><button class="quiet" @click="router.push('/billing/bills')">查看账单中心</button></div></section>
+              <div class="billing-dashboard-grid billing-dashboard-grid--compact">
+                <section class="device-context-card billing-dashboard-chart"><div class="archive-section-title"><i></i><h3>计量趋势</h3><small>{{ historyPeriod.label }}</small></div><div ref="billingUsageChartEl" class="billing-stat-chart"></div></section>
+                <section class="device-context-card billing-dashboard-chart"><div class="archive-section-title"><i></i><h3>采集完整率</h3><small>小时统计</small></div><div ref="billingQualityChartEl" class="billing-stat-chart"></div></section>
+                <section class="device-context-card billing-dashboard-prepared"><div class="archive-section-title"><i></i><h3>计量结算准备度</h3><small>以采集质量为准</small></div><dl class="device-context-facts"><dt>可计费测点</dt><dd>{{ pointDefinitions.filter(item => Number(item.billable) === 1).length }} 个</dd><dt>结算完整率阈值</dt><dd>{{ detailDevice.quality_threshold_pct || 95 }}%</dd><dt>最近统计记录</dt><dd>{{ recentHistory.length }} 条</dd></dl></section>
+                <section class="device-context-card billing-dashboard-entry"><div class="archive-section-title"><i></i><h3>设备计费状态</h3><small>{{ Number(detailDevice.settlement_enabled || 0) === 1 ? '已纳入合同结算范围' : '当前不会参与账单计算' }}</small></div><div class="settlement-switch-card" :class="{ enabled: Number(detailDevice.settlement_enabled || 0) === 1 }"><div><b>{{ Number(detailDevice.settlement_enabled || 0) === 1 ? '允许计费' : '禁止计费' }}</b><span>{{ Number(detailDevice.settlement_enabled || 0) === 1 ? '计费引擎可读取该设备的累计量统计。' : '设备仍可采集数据，但计费引擎会过滤该设备。' }}</span></div><button :class="Number(detailDevice.settlement_enabled || 0) === 1 ? 'quiet' : 'primary'" :disabled="settlementSwitching" @click="toggleDeviceSettlement">{{ settlementSwitching ? '处理中…' : Number(detailDevice.settlement_enabled || 0) === 1 ? '关闭计费' : '允许计费' }}</button></div></section>
               </div>
             </template>
 
@@ -2007,6 +2620,7 @@ onBeforeUnmount(() => {
                   </div>
                   <button v-if="catalogManagedDevice" class="quiet" @click="router.push('/archive/catalog')">打开产品目录</button>
                   <button v-else class="primary" :disabled="pointSaving" @click="savePointDrafts">{{ pointSaving ? '保存中...' : '保存测点' }}</button>
+                  <button class="quiet" @click="openParsePreview">样例解析校验</button>
                 </div>
               </div>
               <div class="point-workspace-body">
@@ -2044,12 +2658,12 @@ onBeforeUnmount(() => {
                   <div class="point-editor-fields">
                     <label><span>测点编码</span><input v-model.trim="pointEditor.point_code" placeholder="total_active_energy"></label>
                     <label><span>测点名称</span><input v-model.trim="pointEditor.point_name" placeholder="总有功电能"></label>
-                    <label><span>数据类型</span><select v-model="pointEditor.data_type"><option>DOUBLE</option><option>INTEGER</option><option>STRING</option></select></label>
+                    <label><span>数据类型</span><AppSelect v-model="pointEditor.data_type"><option>DOUBLE</option><option>INTEGER</option><option>STRING</option></AppSelect></label>
                     <label><span>单位</span><input v-model.trim="pointEditor.unit" placeholder="kWh"></label>
                     <label><span>业务角色</span><input v-model.trim="pointEditor.business_role" placeholder="INSTANT_VALUE"></label>
-                    <label><span>可计费</span><select v-model.number="pointEditor.billable"><option :value="0">否</option><option :value="1">是</option></select></label>
-                    <label><span>纳入统计</span><select v-model.number="pointEditor.stat_enabled"><option :value="1">是</option><option :value="0">否</option></select></label>
-                    <label><span>启用状态</span><select v-model.number="pointEditor.enabled"><option :value="1">启用</option><option :value="0">未启用</option></select></label>
+                    <label><span>可计费</span><AppSelect v-model.number="pointEditor.billable"><option :value="0">否</option><option :value="1">是</option></AppSelect></label>
+                    <label><span>纳入统计</span><AppSelect v-model.number="pointEditor.stat_enabled"><option :value="1">是</option><option :value="0">否</option></AppSelect></label>
+                    <label><span>启用状态</span><AppSelect v-model.number="pointEditor.enabled"><option :value="1">启用</option><option :value="0">未启用</option></AppSelect></label>
                   </div>
                   <button class="primary point-confirm-btn" @click="confirmPointDraft">{{ pointEditingKey ? '确认修改' : '确认新增' }}</button>
                 </aside>
@@ -2060,11 +2674,11 @@ onBeforeUnmount(() => {
       </div>
     </template>
 
-    <AppDialog v-model:open="dialog" :dialog-class="formType === 'device' && !editingId ? 'device-wizard-dialog' : ''" :title="formType === 'device' ? (editingId ? '编辑设备档案' : `登记设备 · 第 ${deviceWizardStep} 步`) : (editingId ? '编辑档案' : '新增档案')" :description="formType === 'device' ? (editingId ? '设备上下文、部署和计量投运会在一次事务中保存。' : '按设备基础信息、型号模板、所属组织三步完成登记。') : '层级档案。'" :confirm-text="formType === 'device' && !editingId ? (deviceWizardStep < 3 ? '下一步' : '确认登记') : undefined" @submit="submitDialog">
+    <AppDialog v-model:open="dialog" :dialog-class="formType === 'device' && !editingId ? 'device-wizard-dialog' : ''" :title="formType === 'device' ? (editingId ? '编辑设备档案' : `登记设备 · 第 ${deviceWizardStep} 步`) : (editingId ? '编辑档案' : '新增档案')" :confirm-text="formType === 'device' && !editingId ? (deviceWizardStep < 3 ? '下一步' : '确认登记') : undefined" @submit="submitDialog">
       <div v-if="formType === 'org'" class="dialog-fields">
         <div class="dialog-field full device-model-tree-field"><span>上级组织</span><button class="quiet tree-root-choice" type="button" :class="{ active: !form.parent_id }" @click="clearDialogOrg">无（根节点）</button><div class="device-model-tree archive-tree-list"><CatalogTreeNode v-for="node in dialogOrgTree" :key="String(node.key)" :node="node" :selected-key="selectedOrgTreeKey" @select="selectDialogOrg" /></div></div>
         <label class="dialog-field"><span>组织名称*</span><input v-model="form.org_name" required></label>
-        <label class="dialog-field"><span>组织类型</span><select v-model="form.org_type"><option v-for="item in orgTypeOptions" :key="String(item.value)" :value="item.value">{{ item.label }}</option></select></label>
+        <label class="dialog-field"><span>组织类型</span><AppSelect v-model="form.org_type"><option v-for="item in orgTypeOptions" :key="String(item.value)" :value="item.value">{{ item.label }}</option></AppSelect></label>
         <label class="dialog-field"><span>负责人</span><input v-model="form.leader"></label>
         <label class="dialog-field"><span>联系电话</span><input v-model="form.phone"></label>
         <label class="dialog-field full"><span>地址</span><textarea v-model="form.address"></textarea></label>
@@ -2076,7 +2690,7 @@ onBeforeUnmount(() => {
         <label class="dialog-field"><span>MQTT 密钥*</span><input v-model="form.mqtt_secret" required></label>
         <label class="dialog-field"><span>IP 地址</span><input v-model="form.ip_address"></label>
         <label class="dialog-field"><span>安装位置</span><input v-model="form.install_location"></label>
-        <label class="dialog-field"><span>启用状态</span><select v-model="form.status"><option v-for="item in statusOptions" :key="String(item.value)" :value="item.value">{{ item.label }}</option></select></label>
+        <label class="dialog-field"><span>启用状态</span><AppSelect v-model="form.status"><option v-for="item in statusOptions" :key="String(item.value)" :value="item.value">{{ item.label }}</option></AppSelect></label>
       </div>
       <div v-else-if="formType === 'device' && editingId" class="dialog-fields">
         <div class="dialog-field full device-model-tree-field">
@@ -2095,16 +2709,17 @@ onBeforeUnmount(() => {
           </div>
           <small v-if="!editingId && selectedPublishedModel" class="device-model-inherit">将继承 {{ selectedPublishedModel.attribute_count || 0 }} 项属性、{{ selectedPublishedModel.point_count || 0 }} 个测点；底层类型和采集默认值自动带入。</small>
         </div>
-        <label class="dialog-field"><span>接入网关</span><select v-model="form.gateway_id"><option value="">暂不部署</option><option v-for="gateway in gatewayOptions.filter(item => String(item.org_id) === String(form.org_id) && Number(item.status) === 1)" :key="String(gateway.id)" :value="String(gateway.id)">{{ gateway.gateway_name || gateway.gateway_sn }}</option></select><small>已部署设备会在组织档案树中按“园区 → 网关 → 设备”层级展示。</small></label>
-        <label v-if="editingId && !form.model_version_id" class="dialog-field"><span>历史设备类型</span><select v-model="form.device_type_id" disabled><option v-for="type in typeOptions" :key="String(type.id)" :value="String(type.id)">{{ type.type_name || type.type_code }}</option></select></label>
+        <label class="dialog-field"><span>接入网关</span><AppSelect v-model="form.gateway_id"><option value="">暂不部署</option><option v-for="gateway in gatewayOptions.filter(item => String(item.org_id) === String(form.org_id) && Number(item.status) === 1)" :key="String(gateway.id)" :value="String(gateway.id)">{{ gateway.gateway_name || gateway.gateway_sn }}</option></AppSelect><small>已部署设备会在组织档案树中按“园区 → 网关 → 设备”层级展示。</small></label>
+        <label class="dialog-field"><span>所属空间</span><AppSelect v-model="form.space_id"><option value="">暂不绑定空间</option><option v-for="space in spaceOptions.filter(item => String(item.org_id) === String(form.org_id) && !['DISABLED','INACTIVE'].includes(String(item.status || '').toUpperCase()))" :key="String(space.id)" :value="String(space.id)">{{ space.space_name || space.space_code }} · {{ space.space_code || '无编码' }}</option></AppSelect><small>绑定后，该设备才能在合同结算范围选择空间时显示。</small></label>
+        <label v-if="editingId && !form.model_version_id" class="dialog-field"><span>历史设备类型</span><AppSelect v-model="form.device_type_id" disabled><option v-for="type in typeOptions" :key="String(type.id)" :value="String(type.id)">{{ type.type_name || type.type_code }}</option></AppSelect></label>
         <label class="dialog-field"><span>设备编号*</span><input v-model="form.device_sn" required></label>
         <label class="dialog-field"><span>设备名称</span><input v-model="form.device_name" placeholder="留空则由型号名称和 SN 自动生成"></label>
         <label v-if="form.gateway_id" class="dialog-field"><span>协议地址{{ selectedModelIsModbus ? '*' : '' }}</span><input v-model="form.protocol_addr" :required="selectedModelIsModbus" placeholder="MODBUS 为 1-247 从站地址"></label>
         <label class="dialog-field"><span>安装位置</span><input v-model="form.install_location"></label>
-        <label class="dialog-field"><span>启用状态</span><select v-model="form.status"><option v-for="item in statusOptions" :key="String(item.value)" :value="item.value">{{ item.label }}</option></select></label>
+        <label class="dialog-field"><span>启用状态</span><AppSelect v-model="form.status"><option v-for="item in statusOptions" :key="String(item.value)" :value="item.value">{{ item.label }}</option></AppSelect></label>
         <template v-if="editingId">
-          <label class="dialog-field"><span>计量投运</span><select v-model="form.settlement_enabled"><option :value="0">不参与结算</option><option :value="1">参与结算</option></select></label>
-          <label class="dialog-field"><span>电表角色</span><select v-model="form.meter_role"><option value="SETTLEMENT">结算表</option><option value="INTERNAL">内部表</option><option value="SUB_METER">分表</option></select></label>
+          <label class="dialog-field"><span>计量投运</span><AppSelect v-model="form.settlement_enabled"><option :value="0">不参与结算</option><option :value="1">参与结算</option></AppSelect></label>
+          <label class="dialog-field"><span>电表角色</span><AppSelect v-model="form.meter_role"><option value="SETTLEMENT">结算表</option><option value="INTERNAL">内部表</option><option value="SUB_METER">分表</option></AppSelect></label>
           <label class="dialog-field"><span>表计倍率</span><input v-model.number="form.meter_factor" type="number" min="0.000001" step="0.000001"></label>
           <label class="dialog-field"><span>质量门禁日期</span><input v-model="form.quality_gate_start_date" type="date"></label>
           <small class="dialog-field full commissioning-hint">当前模板有 {{ billableTotalPointCount }} 个累计计费测点。启用结算前必须完成网关部署；后台会再次校验。</small>
@@ -2119,7 +2734,7 @@ onBeforeUnmount(() => {
         <template v-if="deviceWizardStep === 1">
           <label class="dialog-field"><span>设备编号*</span><input v-model="form.device_sn" required autofocus></label>
           <label class="dialog-field"><span>设备名称</span><input v-model="form.device_name" placeholder="可留空，后续按型号和 SN 生成"></label>
-          <label class="dialog-field"><span>启用状态</span><select v-model="form.status"><option v-for="item in statusOptions" :key="String(item.value)" :value="item.value">{{ item.label }}</option></select></label>
+          <label class="dialog-field"><span>启用状态</span><AppSelect v-model="form.status"><option v-for="item in statusOptions" :key="String(item.value)" :value="item.value">{{ item.label }}</option></AppSelect></label>
         </template>
         <template v-else-if="deviceWizardStep === 2">
           <div class="wizard-two-column">
@@ -2135,14 +2750,14 @@ onBeforeUnmount(() => {
           </div>
         </template>
         <template v-else>
-          <section class="wizard-tree-section"><div class="wizard-section-head"><span>所属组织 / 接入网关</span><button class="quiet tree-root-choice" type="button" :class="{ active: !form.org_id }" @click="clearDialogOrg">无（使用默认最外层组织）</button></div><p class="commissioning-hint">可直接选择组织，也可以展开组织后选择网关；选择网关会同时绑定设备组织。未指定时自动挂载到当前用户权限范围内的默认最外层组织。</p><div class="archive-search-row"><label class="archive-search-box"><Search :size="15" /><input v-model.trim="wizardOrgKeyword" placeholder="搜索组织或网关名称"></label><button v-if="wizardOrgKeyword" class="icon-btn" title="清空" aria-label="清空" @click="wizardOrgKeyword = ''"><X :size="15" /></button></div><div class="device-model-tree archive-tree-list wizard-tree-list"><CatalogTreeNode v-for="node in wizardOrgTree" :key="String(node.key)" :node="node" :selected-key="selectedOrgTreeKey" @select="selectDialogOrg" /><p v-if="!wizardOrgTree.length" class="empty-state">暂无匹配组织或网关。</p></div></section>
+          <section class="wizard-tree-section"><div class="wizard-section-head"><span>所属组织 / 接入网关</span><button class="quiet tree-root-choice" type="button" :class="{ active: !form.org_id }" @click="clearDialogOrg">无（使用默认最外层组织）</button></div><p class="commissioning-hint">可直接选择组织，也可以展开组织后选择网关；选择网关会同时绑定设备组织。未指定时自动挂载到当前用户权限范围内的默认最外层组织。</p><div class="archive-search-row"><label class="archive-search-box"><Search :size="15" /><input v-model.trim="wizardOrgKeyword" placeholder="搜索组织或网关名称"></label><button v-if="wizardOrgKeyword" class="icon-btn" title="清空" aria-label="清空" @click="wizardOrgKeyword = ''"><X :size="15" /></button></div><div class="device-model-tree archive-tree-list wizard-tree-list"><CatalogTreeNode v-for="node in wizardOrgTree" :key="String(node.key)" :node="node" :selected-key="selectedOrgTreeKey" @select="selectDialogOrg" /><p v-if="!wizardOrgTree.length" class="empty-state">暂无匹配组织或网关。</p></div><label class="dialog-field"><span>所属空间</span><AppSelect v-model="form.space_id"><option value="">暂不绑定空间</option><option v-for="space in spaceOptions.filter(item => String(item.org_id) === String(form.org_id) && !['DISABLED','INACTIVE'].includes(String(item.status || '').toUpperCase()))" :key="String(space.id)" :value="String(space.id)">{{ space.space_name || space.space_code }} · {{ space.space_code || '无编码' }}</option></AppSelect><small>绑定后，该设备才能在合同结算范围选择空间时显示。</small></label></section>
         </template>
           </div>
         </Transition>
       </div>
     </AppDialog>
 
-    <AppDialog v-model:open="protocolAddressDialog" title="填写 MODBUS 从站地址" description="已选择网关，请为该设备填写唯一的 1-247 从站地址。" confirm-text="确认并添加" @submit="confirmProtocolAddress">
+    <AppDialog v-model:open="protocolAddressDialog" title="填写 MODBUS 从站地址" confirm-text="确认并添加" @submit="confirmProtocolAddress">
       <div class="dialog-fields protocol-address-dialog">
         <label class="dialog-field"><span>从站地址*</span><input v-model="protocolAddressDraft" type="number" min="1" max="247" step="1" autofocus placeholder="请输入 1-247"></label>
       </div>
@@ -2157,16 +2772,57 @@ onBeforeUnmount(() => {
           </label>
           <button class="icon-btn" title="查询" aria-label="查询" @click="loadBindingDevices"><Search :size="16" /></button>
         </div>
-        <div v-if="bindingLoading" class="empty-state">正在读取设备...</div>
-        <div v-else-if="!bindableDevices.length" class="empty-state">暂无可绑定设备。</div>
+        <AppLoadingState v-if="bindingLoading" />
+        <div v-else-if="!bindingDevices.length" class="empty-state">暂无可绑定设备。</div>
         <div v-else class="archive-bind-list">
-          <label v-for="device in bindableDevices" :key="String(device.id)" class="archive-bind-item">
+          <label v-for="device in bindingDevices" :key="String(device.id)" class="archive-bind-item">
             <input type="checkbox" :checked="bindingDeviceIds.includes(String(device.id))" @change="toggleBindingDevice(device.id, ($event.target as HTMLInputElement).checked)">
             <span>
               <b>{{ device.device_name || device.device_sn }}</b>
               <small>{{ device.device_sn }} · {{ device.type_name || '设备类型/型号' }} · {{ device.gateway_name || device.gateway_sn || '未绑定网关' }}</small>
             </span>
           </label>
+        </div>
+      </div>
+    </AppDialog>
+
+    <AppDialog v-model:open="parsePreviewDialog" title="样例报文解析校验" :saving="parsePreviewBusy" @submit="runParsePreview">
+      <div class="dialog-fields">
+        <label class="dialog-field full"><span>客户样例 JSON</span><textarea v-model="parsePreviewPayload" spellcheck="false"></textarea></label>
+        <div v-if="parsePreviewResult" class="dialog-field full"><span>逐测点校验结果</span><pre>{{ JSON.stringify(parsePreviewResult, null, 2) }}</pre></div>
+      </div>
+    </AppDialog>
+
+    <AppDialog v-model:open="metricTemplateDialog" title="配置设备测点模板" confirm-text="保存模板" @submit="saveMetricTemplate">
+      <div class="metric-template-dialog">
+        <div class="metric-template-summary">
+          <span class="metric-template-user-label">当前用户</span>
+          <b class="metric-template-user-name">{{ session.user?.nickname || session.user?.username || '当前用户' }}</b>
+          <span class="metric-template-visibility-tip"><span aria-hidden="true">i</span>模板仅对当前用户可见</span>
+        </div>
+        <label class="dialog-field full"><span>模板名称*</span><input v-model.trim="metricTemplateName" placeholder="例如：能源总览测点"></label>
+        <div class="metric-template-toolbar">
+          <label class="archive-search-box metric-template-search">
+            <Search :size="15" />
+            <input v-model.trim="metricPointSearchKeyword" placeholder="搜索测点名称、编码或单位">
+          </label>
+          <details class="detail-filter-menu metric-template-group-menu">
+            <summary>分组 · {{ metricPointGroupFilters.length ? `${metricPointGroupFilters.length} 组` : '全部' }}<ChevronDown :size="14" /></summary>
+            <div>
+              <label v-for="group in metricPointGroupOptions" :key="group"><input type="checkbox" :checked="metricPointGroupFilters.includes(group)" @change="toggleMetricPointGroup(group, ($event.target as HTMLInputElement).checked)"><span>{{ group }}</span></label>
+            </div>
+          </details>
+        </div>
+        <div class="metric-template-points">
+          <div class="metric-template-head"><b>选择测点</b><span>{{ selectedMetricPointCodes.length }} / {{ filteredMetricPointOptions.length }}</span></div>
+          <label v-for="point in filteredMetricPointOptions" :key="metricPointCode(point)" class="metric-template-point">
+            <input v-model="selectedMetricPointCodes" type="checkbox" :value="metricPointCode(point)">
+            <span>
+              <b>{{ point.point_name || metricPointCode(point) }}</b>
+              <small>{{ String(point.business_role || point.data_type || point.group_name || '未分组') }} · {{ metricPointCode(point) }} · {{ point.unit || '无单位' }}</small>
+            </span>
+          </label>
+          <p v-if="!filteredMetricPointOptions.length" class="archive-no-data">当前设备没有可用测点。</p>
         </div>
       </div>
     </AppDialog>
@@ -2183,11 +2839,13 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.device-model-tree-field{display:block}.device-model-tree-field>span{display:block;margin-bottom:7px}.device-model-tree{height:230px;padding:6px;border:1px solid var(--border);background:#fff;overflow:auto}.device-model-selected{min-height:36px;display:flex;align-items:center;padding:0 10px;border:1px solid var(--border);background:#f7f9fc;color:#52667e;font-size:12px}.device-model-inherit{display:block;margin-top:6px;color:var(--muted);font-size:10px;line-height:1.5}.tree-root-choice{height:28px;margin-bottom:5px;font-size:11px}.tree-root-choice.active{border-color:#00b8bd;color:#00a5ab}.archive-perspective-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin:8px 0}.archive-perspective-tabs button{height:28px;border:1px solid var(--border);background:#fff;color:#52667e;font-size:11px}.archive-perspective-tabs button.active{border-color:#00b8bd;color:#008f94;background:#f0fbfb}.commissioning-hint{color:var(--muted);font-size:10px;line-height:1.5}.attribute-override-list>div{display:flex;align-items:center;justify-content:space-between;gap:12px}.attribute-override-list>div>span{display:flex;flex-direction:column;min-width:0}.attribute-override-list small{font-size:10px;color:var(--muted)}.attribute-override-list label{display:flex;align-items:center;gap:5px}.attribute-override-list input{width:130px;height:28px;border:1px solid var(--border);padding:0 7px}.attribute-override-list em{font-style:normal;color:var(--muted);font-size:11px}.attribute-override-actions{display:flex;justify-content:flex-end;margin-top:8px}.device-wizard-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:4px}.device-wizard-steps span{padding:7px 4px;border-bottom:2px solid var(--border);color:var(--muted);font-size:11px;text-align:center}.device-wizard-steps span.active{border-color:#00b8bd;color:#008f94}.wizard-two-column{display:grid;grid-template-columns:minmax(230px,0.9fr) minmax(260px,1.1fr);gap:10px}.wizard-selection-panel,.wizard-preview-panel{min-width:0}.wizard-tree-list{height:300px}.wizard-preview-panel{min-height:300px;padding:10px;border:1px solid var(--border);background:#fbfcfe;overflow:auto}.wizard-preview-panel h4{margin:12px 0 6px;color:#52667e;font-size:11px}.wizard-preview-panel h4:first-child{margin-top:0}.wizard-preview-list>div{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);font-size:11px}.wizard-preview-list>div span{color:#52667e}.wizard-preview-list>div b{font-weight:500;color:#283f5a}.wizard-preview-panel .device-template-summary{display:flex;flex-direction:column;gap:4px;padding-bottom:8px;border-bottom:1px solid var(--border)}.wizard-preview-panel .device-template-summary small{color:var(--muted);font-size:10px}.wizard-tree-section{display:block}.wizard-section-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.wizard-section-head>span{font-size:12px}.wizard-section-head .tree-root-choice{margin-bottom:0}.catalog-create-hint{color:var(--muted);font-size:10px;line-height:1.5}@media(max-width:650px){.wizard-two-column{grid-template-columns:1fr}.wizard-tree-list{height:220px}}
+.device-model-tree-field{display:block}.device-model-tree-field>span{display:block;margin-bottom:7px}.device-model-tree{height:230px;padding:6px;border:1px solid var(--border);background:#fff;overflow:auto}.device-model-selected{min-height:36px;display:flex;align-items:center;padding:0 10px;border:1px solid var(--border);background:#f7f9fc;color:#52667e;font-size:12px}.device-model-inherit{display:block;margin-top:6px;color:var(--muted);font-size:10px;line-height:1.5}.tree-root-choice{height:28px;margin-bottom:5px;font-size:11px}.tree-root-choice.active{border-color:#00b8bd;color:#00a5ab}.archive-perspective-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin:8px 0}.archive-perspective-tabs button{height:28px;border:1px solid var(--border);background:#fff;color:#52667e;font-size:11px}.archive-perspective-tabs button.active{border-color:#00b8bd;color:#008f94;background:#f0fbfb}.commissioning-hint{color:var(--muted);font-size:10px;line-height:1.5}.attribute-override-list>div{display:flex;align-items:center;justify-content:space-between;gap:12px}.attribute-override-list>div>span{display:flex;flex-direction:column;min-width:0}.attribute-override-list small{font-size:10px;color:var(--muted)}.attribute-override-list label{display:flex;align-items:center;gap:5px}.attribute-override-list input{width:130px;height:28px;border:1px solid var(--border);padding:0 7px}.attribute-override-list em{font-style:normal;color:var(--muted);font-size:11px}.attribute-override-actions{display:flex;justify-content:flex-end;margin-top:8px}.device-wizard-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:4px}.device-wizard-steps span{padding:7px 4px;border-bottom:2px solid var(--border);color:var(--muted);font-size:11px;text-align:center}.device-wizard-steps span.active{border-color:#00b8bd;color:#008f94}.wizard-two-column{display:grid;grid-template-columns:minmax(230px,0.9fr) minmax(260px,1.1fr);gap:10px}.wizard-selection-panel,.wizard-preview-panel{min-width:0}.wizard-tree-list{height:300px}.wizard-preview-panel{min-height:300px;padding:10px;border:1px solid var(--border);background:#fbfcfe;overflow:auto}.wizard-preview-panel h4{margin:12px 0 6px;color:#52667e;font-size:11px}.wizard-preview-panel h4:first-child{margin-top:0}.wizard-preview-list>div{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);font-size:11px}.wizard-preview-list>div span{color:#52667e}.wizard-preview-list>div b{font-weight:500;color:#283f5a}.wizard-preview-panel .device-template-summary{display:flex;flex-direction:column;gap:4px;padding-bottom:8px;border-bottom:1px solid var(--border)}.wizard-preview-panel .device-template-summary small{color:var(--muted);font-size:10px}.wizard-tree-section{display:block}.wizard-section-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.wizard-section-head>span{font-size:12px}.wizard-section-head .tree-root-choice{margin-bottom:0}.catalog-create-hint{color:var(--muted);font-size:10px;line-height:1.5}.archive-toolbar-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.archive-toolbar-actions .add-action{height:28px;padding:0 10px;font-size:11px}.archive-toolbar-actions .bind-action{min-width:72px}.archive-toolbar-actions .icon-btn{width:28px;height:28px;padding:0}.history-toolbar-row{justify-content:flex-end;gap:5px}.history-toolbar-row .history-period-tabs{margin-left:auto}.history-toolbar-row .history-period-tabs button{height:26px;min-width:30px;padding:0 7px;font-size:11px}.history-toolbar-row .archive-period-arrow{min-width:24px;height:26px;font-size:16px}.history-toolbar-row .archive-period-label{min-width:150px;font-size:11px}.history-toolbar-row .icon-btn{width:28px;height:28px;padding:0}.archive-device-data-body--full,.archive-full-table{height:100%;min-height:0}.archive-full-table{display:flex;flex-direction:column}.archive-full-table-head{flex:none;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr)}.archive-full-table-row{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr)}.archive-bind-dialog{display:grid;gap:12px}.archive-bind-list{display:grid;gap:8px;max-height:340px;overflow:auto}.archive-bind-item{display:flex;align-items:flex-start;gap:10px;padding:10px 11px;border:1px solid var(--border);border-radius:7px;background:#fff;cursor:pointer}.archive-bind-item input{margin-top:2px}.archive-bind-item b{display:block;font-size:12px}.archive-bind-item small{display:block;color:var(--muted);font-size:10px;line-height:1.4}.archive-main-panel>.archive-runtime-grid,.archive-main-panel>.archive-history-panel,.archive-main-panel>.archive-device-data-panel{min-height:0}.archive-runtime-grid{flex:1;display:grid;grid-template-columns:minmax(280px,0.92fr) minmax(0,1.08fr);gap:12px;min-height:0}.archive-info-card,.archive-realtime-card{min-height:0;display:flex;flex-direction:column}.archive-card-scroll{flex:1;min-height:0;overflow:auto}.archive-device-data-panel{flex:1;display:flex;flex-direction:column;min-height:0}.archive-device-data-body--full{flex:1;min-height:0;display:flex;flex-direction:column}.archive-device-data-body--full .archive-chart-shell,.archive-device-data-body--full .archive-data-table{flex:1;min-height:0}.archive-device-data-body--full .archive-chart-shell{display:flex;flex-direction:column}.archive-device-data-body--full .archive-chart-shell>*{min-height:0}.archive-history-shell{display:flex;flex-direction:column}.archive-history-shell .archive-history-chart{flex:1;min-height:0;height:100%;width:100%}.archive-section-title{min-height:34px}.archive-main-panel>.archive-runtime-grid .archive-section-title{flex:none}.device-detail-layout>.device-detail-left,.device-detail-layout>.device-detail-right,.device-detail-layout>.device-detail-main{min-height:0}
 .device-wizard-dialog .dialog-actions{flex-direction:column;align-items:center;gap:8px}.device-wizard-dialog .dialog-actions button{width:min(280px,100%);min-height:36px}.device-wizard-fields{display:block}.device-wizard-fields>.device-wizard-steps{width:100%;margin-bottom:14px}.device-wizard-fields>.dialog-field{grid-template-columns:110px minmax(0,1fr);align-items:center;margin-bottom:12px}.device-wizard-fields>.dialog-field>span{white-space:nowrap;text-align:right}.device-wizard-fields>.device-wizard-error{margin:0 0 12px;padding:9px 11px;border:1px solid #f0b7ad;background:#fff5f2;color:#b64c36;font-size:11px;line-height:1.5}.device-wizard-fields>.wizard-tree-section{width:100%}.device-wizard-fields>.wizard-tree-section+.wizard-tree-section{margin-top:12px}
+.archive-realtime-title{flex-wrap:nowrap}.archive-realtime-title h3{flex:none}.archive-realtime-title .archive-chart-actions{margin-left:auto}.archive-template-strip--row{display:flex;align-items:center;gap:7px;flex-wrap:wrap;min-height:38px;margin:0 0 8px;padding:5px 2px 7px;border-bottom:1px solid var(--border)}.archive-template-strip--row .archive-template-chip{display:inline-flex;align-items:center;gap:7px;height:26px;margin:0;padding:0 8px 0 11px;border:1px solid #c8d9ed;border-radius:6px;background:linear-gradient(180deg,#fff 0%,#f4f8fd 100%);box-shadow:0 1px 2px #17375c12;color:#365675;font-size:11px;font-weight:600;line-height:1;cursor:pointer;transition:border-color .18s,background .18s,box-shadow .18s,color .18s}.archive-template-strip--row .archive-template-chip:hover{border-color:#8eb9e8;background:#f2f8ff;box-shadow:0 3px 8px #17375c16;color:var(--accent)}.archive-template-strip--row .archive-template-chip.active{border-color:var(--accent);background:#eaf4ff;color:#1769c2;box-shadow:inset 0 0 0 1px #2f86ff26}.archive-template-strip--row .archive-template-chip :deep(svg){flex:none;color:#7892ad;stroke-width:2}.archive-template-strip--row .archive-template-chip:hover :deep(svg),.archive-template-strip--row .archive-template-chip.active :deep(svg){color:var(--accent)}.archive-template-empty{color:var(--muted);font-size:10px}.metric-template-summary{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap;padding:9px 10px;border:1px solid #d7e5f4;border-radius:7px;background:#f7fbff}.metric-template-user-label{color:#6a7f96;font-size:11px;white-space:nowrap}.metric-template-user-name{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:4px 9px;border:1px solid #c9dcef;border-radius:999px;background:#fff;color:#294f76;font-size:11px;font-weight:700}.metric-template-visibility-tip{display:inline-flex;align-items:center;gap:5px;min-width:0;margin-left:auto;padding:4px 8px;border:1px solid #cfe1f3;border-radius:5px;background:#edf6ff;color:#54718e;font-size:10px;line-height:1.35}.metric-template-visibility-tip>span{display:grid;place-items:center;width:14px;height:14px;flex:none;border-radius:50%;background:#6aa5de;color:#fff;font-size:10px;font-weight:700}.archive-record-toolbar{display:flex;align-items:center;gap:7px;flex:none;margin:0 0 8px}.archive-record-search{flex:1;min-width:0;height:32px}.archive-record-search input{height:auto!important;border:0!important;padding:0!important;box-shadow:none!important}.archive-record-filter{box-sizing:border-box;flex:0 0 118px;width:118px;height:32px;padding:0 8px;border:1px solid #d4e2f2;border-radius:6px;background:#fff;color:#52667e;font-size:11px;outline:0}.archive-record-filter:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgb(47 134 255 / 10%)}.history-period-tabs{display:inline-flex;align-items:center;gap:2px;padding:3px;border:1px solid #cbdced;border-radius:7px;background:#f4f8fc;box-shadow:inset 0 1px 2px #17375c0a}.history-period-tabs button{height:24px;min-width:28px;padding:0 8px;border:0;border-radius:4px;background:transparent;color:#6a7f96;font-size:11px;font-weight:600;line-height:1;cursor:pointer;transition:background .18s,color .18s,box-shadow .18s}.history-period-tabs button:hover{color:var(--accent);background:#e8f3ff}.history-period-tabs button.active{background:#fff;color:#1769c2;box-shadow:0 1px 4px #17375c20}.history-toolbar-row{justify-content:flex-end;gap:4px}.history-toolbar-row .history-period-tabs{margin-left:auto}.history-toolbar-row .archive-period-arrow{width:24px;min-width:24px;height:26px;padding:0;border:1px solid #cbdced;border-radius:5px;background:#fff;color:#55718e;font-size:16px;line-height:1}.history-toolbar-row .archive-period-arrow:hover{border-color:var(--accent);color:var(--accent);background:#f2f8ff}.history-toolbar-row .archive-period-label{min-width:142px;color:#385675;font-size:11px;text-align:center}.archive-table-headbar{display:flex;align-items:center;gap:7px;flex:none;min-height:40px;padding:0 10px;border-bottom:1px solid var(--border);background:#fbfcfe;z-index:3}.archive-table-headbar .archive-table-search{flex:1;min-width:0;height:30px}.archive-table-headbar .archive-column-filter-menu{flex:0 0 118px;width:118px}.archive-table-headbar .archive-column-filter-menu summary{height:30px;padding:0 8px;font-size:10px}.archive-full-table{display:flex;flex-direction:column;height:100%;min-height:0;overflow:auto;scrollbar-width:none}.archive-full-table::-webkit-scrollbar{display:none}.archive-full-table .archive-full-table-head,.archive-full-table .archive-full-table-row{flex:none}.archive-full-table-head{position:sticky;top:40px;z-index:2;background:#f4f8fc}.archive-full-table-row{min-height:38px;border-bottom:1px solid #edf2f7}.archive-full-table-row:nth-child(even){background:#fbfcfe}.archive-full-table-row>span,.archive-full-table-head>span{min-width:0;padding:8px 9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}.archive-full-table-head>span{padding-top:10px;padding-bottom:10px;color:#55718e;font-weight:700}.archive-full-table .archive-table-pagination{flex:none;margin-top:auto}.archive-device-data-body--full>.archive-full-table{flex:1}.metric-template-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;width:100%;min-width:0}.metric-template-search{flex:1 1 auto;min-width:0;height:34px}.metric-template-search input{height:auto!important;border:0!important;padding:0!important;box-shadow:none!important}.metric-template-group-menu{position:relative;flex:0 0 120px;width:120px;min-width:120px}.metric-template-group-menu summary{height:34px;box-sizing:border-box;padding:0 9px;font-size:11px}.metric-template-group-menu[open]>div{z-index:90;right:0;left:auto;width:220px;max-width:calc(100vw - 42px)}.metric-template-points{position:relative;isolation:isolate;display:grid;gap:6px;max-height:320px;min-height:0;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:8px;background:#fbfcfe;scrollbar-width:none}.metric-template-points::-webkit-scrollbar{display:none}.metric-template-head{position:sticky;top:0;z-index:20;isolation:isolate;display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:32px;margin:-8px -8px 0;padding:7px 10px 8px;border-bottom:1px solid #c8d9ed;background:#fbfcfe;box-shadow:0 2px 5px #17375c12}.metric-template-head:after{content:'';position:absolute;inset:100% 0 auto;height:4px;background:#fbfcfe;pointer-events:none}.metric-template-head b{color:#29425e;font-size:11px;font-weight:700}.metric-template-head span{color:#6d8298;font-size:10px}.metric-template-point{position:relative;z-index:0;display:flex;align-items:flex-start;gap:8px;min-height:34px;padding:7px 8px;border:1px solid #d8e4f0;border-radius:6px;background:#fff;box-shadow:0 1px 1px #17375c0a;cursor:pointer;transition:border-color .18s,background .18s,box-shadow .18s,transform .18s}.metric-template-point:hover{z-index:1;border-color:#9fc2ec;background:#f7fbff;box-shadow:0 2px 8px #17375c12;transform:translateY(-1px)}.metric-template-point input[type='checkbox']{box-sizing:border-box;width:12px;height:12px;min-width:12px;margin:2px 0 0;accent-color:var(--accent)}.metric-template-point span{display:grid;gap:2px;min-width:0;flex:1}.metric-template-point b,.metric-template-point small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.metric-template-point b{color:#29425e;font-size:11px;font-weight:600}.metric-template-point small{color:var(--muted);font-size:10px;line-height:1.3}.metric-template-dialog .metric-template-summary,.metric-template-dialog .dialog-field.full,.metric-template-dialog .metric-template-toolbar,.metric-template-dialog .metric-template-points{margin-top:8px}.metric-template-dialog .metric-template-summary{margin-top:0}.metric-template-dialog .archive-no-data{min-height:70px;display:grid;place-items:center;margin:0;padding:10px;color:var(--muted);font-size:11px}.metric-template-dialog :deep(.dialog-actions){border-top:1px solid var(--border)}@media(max-width:640px){.metric-template-visibility-tip{width:100%;margin-left:0}.archive-table-headbar{padding:0 6px}.archive-table-headbar .archive-column-filter-menu{flex-basis:106px;width:106px}.history-toolbar-row .archive-period-label{min-width:112px}.archive-record-filter{flex-basis:106px;width:106px}.metric-template-toolbar{gap:6px}.metric-template-group-menu{flex-basis:104px;width:104px;min-width:104px}.metric-template-points{max-height:280px}}
 .wizard-selection-panel{height:100%;display:flex;flex-direction:column}.wizard-selection-panel .wizard-tree-list{flex:1;height:auto;min-height:0}.protocol-address-dialog{min-height:72px}
 :deep(.device-wizard-dialog){width:min(780px,calc(100vw - 34px));height:min(720px,calc(100vh - 36px));max-height:none;display:flex;flex-direction:column}.device-wizard-dialog :deep(.dialog-fields){flex:1;min-height:0;overflow:auto}.device-wizard-dialog :deep(.dialog-actions){flex:none;flex-direction:column;align-items:center;gap:8px}.device-wizard-dialog :deep(.dialog-actions) button{width:min(280px,100%);min-height:40px}.device-wizard-fields{min-height:0}.wizard-step-panel{height:455px;min-height:455px;display:flex;flex-direction:column}.wizard-step-panel>.wizard-two-column{height:100%;min-height:0}.wizard-step-panel>.wizard-tree-section{flex:1;min-height:0;display:flex;flex-direction:column}.wizard-step-panel .wizard-tree-list{min-height:300px}.wizard-step-enter-active,.wizard-step-leave-active{transition:opacity .22s ease,transform .22s ease}.wizard-step-enter-from{opacity:0;transform:translateX(18px)}.wizard-step-leave-to{opacity:0;transform:translateX(-18px)}
 .device-wizard-progress{position:relative;height:4px;margin:0 4px 12px;border-radius:999px;background:#e6edf6;overflow:hidden}.device-wizard-progress span{display:block;height:100%;border-radius:inherit;background:#2d7ff0;transition:width .35s ease}
 .detail-view-filters{display:flex;align-items:center;gap:7px}.detail-view-filters input,.detail-view-filters select{height:30px;min-width:150px;padding:0 8px;border:1px solid var(--border);background:#fff;color:#52667e;font-size:11px}.attribute-view-table{margin:14px;overflow:auto;border:1px solid var(--border)}.attribute-view-table table{width:100%;min-width:720px;border-collapse:collapse;font-size:12px}.attribute-view-table th,.attribute-view-table td{height:38px;padding:7px 10px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap}.attribute-view-table th{background:#f7f9fc;color:#5b6e84;font-weight:600}@media(max-width:860px){.detail-view-filters{width:100%;flex-wrap:wrap}.detail-view-filters input,.detail-view-filters select{flex:1;min-width:130px}}
 .device-filter-field{min-width:190px}.device-search-field{min-width:min(330px,100%)}.device-filter-menu,.detail-filter-menu{position:relative;width:100%;min-width:0}.device-filter-menu summary,.detail-filter-menu summary{height:36px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 11px;border:1px solid #d4e2f2;border-radius:7px;background:#fff;color:#3d5876;cursor:pointer;list-style:none;box-shadow:0 1px 2px #17375c08;transition:border-color .18s,box-shadow .18s}.device-filter-menu summary::-webkit-details-marker,.detail-filter-menu summary::-webkit-details-marker{display:none}.device-filter-menu summary:hover,.detail-filter-menu summary:hover{border-color:var(--accent);box-shadow:0 0 0 3px #4c8dff12}.device-filter-menu[open]>div,.detail-filter-menu[open]>div{position:absolute;top:42px;left:0;z-index:12;display:grid;gap:3px;width:max-content;min-width:100%;max-width:min(360px,calc(100vw - 38px));max-height:260px;padding:8px;border:1px solid #d4e2f2;border-radius:8px;background:#fff;box-shadow:0 14px 30px #17375c20;overflow:auto;scrollbar-width:none}.device-filter-menu[open]>div::-webkit-scrollbar,.detail-filter-menu[open]>div::-webkit-scrollbar{display:none}.device-filter-menu label,.detail-filter-menu label{display:flex;align-items:center;gap:7px;min-height:30px;padding:0 8px;border-radius:5px;color:#38536f;font-size:12px;white-space:nowrap;cursor:pointer}.device-filter-menu label:hover,.detail-filter-menu label:hover{background:#f0f6ff;color:var(--accent)}.device-filter-menu input[type='checkbox'],.detail-filter-menu input[type='checkbox']{box-sizing:border-box;width:12px;height:12px;min-width:12px;max-width:12px;min-height:12px;max-height:12px;margin:0;padding:0;flex:0 0 12px;accent-color:var(--accent)}.device-filter-menu.disabled summary{border-style:dashed;background:#f7f9fc;color:#9aaabd;cursor:not-allowed}.filter-menu-hint{margin:2px 4px;padding:7px 8px;color:#8494a8;font-size:11px;white-space:nowrap}.detail-filter-search{height:36px;display:flex;align-items:center;gap:7px;min-width:220px;padding:0 10px;border:1px solid #d4e2f2;border-radius:7px;background:#fff;color:#7890aa}.detail-filter-search input{min-width:0;width:100%;height:auto!important;padding:0!important;border:0!important;box-shadow:none!important;outline:0}.detail-filter-menu{width:190px}.detail-filter-menu summary{font-size:11px}.detail-filter-menu[open]>div{right:0;left:auto}.detail-view-filters{display:flex;align-items:center;gap:8px}
-</style>
+.device-card-media,.device-detail-image{display:grid;place-items:center;overflow:hidden;background:#f7f9fc;color:#8da1b7}.device-card-media img,.device-detail-image img{width:100%;height:100%;object-fit:cover;display:block}.device-detail-image{width:100%;aspect-ratio:4/3;border:1px solid var(--border);border-radius:8px}
+.device-context-grid--single{grid-template-columns:minmax(0,1fr)}.device-alarm-filters{margin:0 0 10px;flex-wrap:wrap}.device-alarm-filters .detail-filter-search{flex:1;min-width:240px}.detail-filter-select{height:30px;min-width:150px;padding:0 8px;border:1px solid var(--border);border-radius:6px;background:#fff;color:#52667e;font-size:11px}.device-context-table-card{overflow:hidden}.device-context-table-card .archive-full-table{border:1px solid #d9e5f2;border-radius:10px;background:#fbfdff;overflow:auto}.device-context-table-card .archive-full-table-head{background:#edf4fb;color:#49637f;font-weight:700;min-height:40px}.device-context-table-card .archive-full-table-row{min-height:44px;border-bottom:1px solid #e8eff6;transition:background .18s ease}.device-context-table-card .archive-full-table-row:hover{background:#f1f7ff}.device-context-table-card .archive-full-table-row span{color:#49627c}.device-context-table-card .archive-table-pagination{padding:10px 4px 0}.billing-dashboard-grid--compact{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.billing-dashboard-grid--compact .billing-dashboard-chart{min-height:280px}.billing-dashboard-grid--compact .billing-dashboard-prepared,.billing-dashboard-grid--compact .billing-dashboard-entry{grid-column:span 1}.billing-dashboard-grid--compact .billing-dashboard-prepared{grid-row:2}.billing-dashboard-grid--compact .billing-dashboard-entry{grid-row:2}.billing-stat-chart{width:100%;height:240px;min-height:240px}.settlement-switch-card{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:104px;padding:18px;border:1px solid #dce5ec;border-radius:12px;background:#f7f9fb}.settlement-switch-card.enabled{border-color:#c8ded8;background:#f4faf8}.settlement-switch-card>div{min-width:0}.settlement-switch-card b,.settlement-switch-card span{display:block}.settlement-switch-card b{color:#334b5e;font-size:17px}.settlement-switch-card span{margin-top:7px;color:#788b9b;font-size:12px;line-height:1.6}.settlement-switch-card button{flex:none;min-width:92px}@media(max-width:760px){.billing-dashboard-grid--compact{grid-template-columns:1fr}.billing-dashboard-grid--compact .billing-dashboard-prepared,.billing-dashboard-grid--compact .billing-dashboard-entry{grid-column:auto;grid-row:auto}.settlement-switch-card{align-items:flex-start;flex-direction:column}.settlement-switch-card button{width:100%}}</style>
