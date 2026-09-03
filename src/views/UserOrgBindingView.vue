@@ -72,8 +72,8 @@ async function saveScopes() {
   try {
     const scopes = Object.entries(selectedOrgModes.value).map(([orgId, scopeMode]) => ({ orgId: Number(orgId), scopeMode }))
     await assignUserOrgScopes(selectedUserId.value, scopes)
-    notice.value = '用户组织绑定已保存'
-    showAppAlert({ title: '操作成功', message: notice.value, type: 'success' })
+    notice.value = ''
+    showAppAlert({ title: '用户组织绑定已保存', message: '组织权限范围已更新。', type: 'success' })
   } catch (e) {
     error.value = e instanceof Error ? e.message : '用户组织绑定保存失败'
   } finally {
@@ -104,14 +104,14 @@ onMounted(load)
 <template>
   <section class="view-page user-org-binding-page">
     <header class="view-head">
-      <div><p class="eyebrow">USER ORG SCOPE</p><h1>用户组织绑定</h1><p>组织范围授权。</p></div>
+      <div><p class="eyebrow">USER ORG SCOPE</p><h1>用户组织绑定</h1></div>
       <button class="quiet" @click="load">刷新</button>
     </header>
     <div class="org-binding-board">
       <article class="panel rbac-column">
         <div class="panel-head"><div><h3>用户列表</h3><small>{{ selectedUser ? userLabel(selectedUser) : '请选择用户' }}</small></div></div>
         <FilterBar v-model:keyword="keyword" :busy="loading" :show-reset="false" placeholder="搜索账号、姓名或电话" @query="runFilter" />
-        <div v-if="loading" class="empty-state">正在读取用户...</div>
+        <AppLoadingState v-if="loading" />
         <div v-else class="rbac-list">
           <button v-for="user in visibleUsers" :key="String(user.id)" class="rbac-item" :class="{ active: String(user.id) === String(selectedUserId) }" @click="selectUser(user)">
             <b>{{ userLabel(user) }}</b><span>{{ user.username }} / {{ Number(user.status) === 1 ? '正常' : '禁用' }}</span>

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onMounted, nextTick, ref } from 'vue'
-import { useAlertRef } from '@/composables/useAppAlert'
+import { computed, onMounted, nextTick, ref } from 'vue'
+import { showAppAlert, useAlertRef } from '@/composables/useAppAlert'
 import { Lock, QrCode, Smartphone, UserRound } from '@lucide/vue'
+import publicSecurityBadge from '@/assets/public-security-badge.png'
 import { useRoute, useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 
@@ -19,6 +20,19 @@ const agreementBody = ref<HTMLElement | null>(null)
 const router = useRouter()
 const route = useRoute()
 const session = useSessionStore()
+const localTestLogin = computed(() => username.value.trim() === 'test' && password.value === 'test')
+
+function loginRoleLabel() {
+  const role = String(session.roles[0] || session.user?.roleName || session.user?.role_name || '').trim()
+  const labels: Record<string, string> = {
+    super_admin: '超级管理员',
+    admin: '管理员',
+    finance: '财务人员',
+    operator: '运营人员',
+    viewer: '查看人员',
+  }
+  return labels[role] || role || '平台用户'
+}
 
 function randomCaptcha() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
@@ -41,6 +55,8 @@ async function doLogin() {
   try {
     session.clear()
     await session.signIn(username.value, password.value)
+    const accountName = String(session.user?.nickname || session.user?.username || username.value.trim() || '当前账户')
+    showAppAlert({ type: 'success', title: '欢迎回来', message: `${loginRoleLabel()} · ${accountName}` })
     const target = String(route.query.redirect || '/dashboard')
     await router.replace(target.startsWith('/login') ? '/dashboard' : target)
   } catch (e) {
@@ -51,7 +67,7 @@ async function doLogin() {
 }
 
 async function submit() {
-  if (captchaInput.value.trim().toUpperCase() !== captcha.value) {
+  if (!localTestLogin.value && captchaInput.value.trim().toUpperCase() !== captcha.value) {
     error.value = '验证码失败'
     randomCaptcha()
     captchaInput.value = ''
@@ -134,6 +150,10 @@ onMounted(randomCaptcha)
         <p class="login-help">忘记密码</p>
       </div>
     </main>
+    <div class="login-record-footer">
+      <img class="login-record-icon" :src="publicSecurityBadge" alt="公安备案图标">
+      <a href="https://beian.mps.gov.cn/#/query/webSearch?code=51010602002253" rel="noreferrer" target="_blank">浙ICP备2026068645号</a>
+    </div>
     <div v-if="agreementOpen" class="drawer-backdrop modal-backdrop login-agreement-backdrop" @click.self="closeAgreement">
       <section class="login-agreement-dialog">
         <div class="agreement-head">

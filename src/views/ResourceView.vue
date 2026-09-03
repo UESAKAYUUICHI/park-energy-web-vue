@@ -8,21 +8,27 @@ import AppDialog from '@/components/app/AppDialog.vue'
 import AppDrawer from '@/components/app/AppDrawer.vue'
 import FilterBar from '@/components/app/FilterBar.vue'
 import StatusTag from '@/components/app/StatusTag.vue'
-import { Pencil, RefreshCw, Settings, Trash2 } from '@lucide/vue'
+import { Eye, Pencil, RefreshCw, Settings, Trash2 } from '@lucide/vue'
 import { resourceSchemas, type ResourceSchema } from '@/config/resourceSchemas'
-import { createResource, deviceTypePoints, listResource, parsePoints, removeResource, saveDeviceTypePoints, updateResource } from '@/api/platform'
+import { createResource, deviceTypePoints, getResource, listResource, parsePoints, removeResource, saveDeviceTypePoints, updateResource } from '@/api/platform'
 import type { RecordRow } from '@/types/domain'
 import { useSessionStore } from '@/stores/session'
 import { fieldLabel } from '@/utils/fieldLabels'
 
 const route = useRoute()
 const session = useSessionStore()
-const resourceKey = computed(() => String(route.meta.resource || '').replace(/^billing:/, ''))
+const props = withDefaults(defineProps<{
+  resource?: string
+  area?: 'archive' | 'billing'
+  embedded?: boolean
+  readOnly?: boolean
+  compact?: boolean
+}>(), { resource: '', embedded: false, readOnly: false, compact: false })
+const resourceKey = computed(() => String(props.resource || route.meta.resource || '').replace(/^billing:/, ''))
 const schema = computed<ResourceSchema | undefined>(() => resourceSchemas[resourceKey.value])
-const schemaArea = computed(() => schema.value?.area ?? (String(route.path).startsWith('/billing/') ? 'billing' : 'archive'))
+const schemaArea = computed(() => props.area ?? schema.value?.area ?? (String(route.path).startsWith('/billing/') ? 'billing' : 'archive'))
 const schemaResource = computed(() => schema.value?.resource ?? resourceKey.value)
 const schemaTitle = computed(() => schema.value?.title ?? '资源')
-const schemaDescription = computed(() => schema.value?.description ?? '当前页面未配置资源 schema。')
 const schemaFields = computed(() => schema.value?.fields ?? [])
 const schemaReady = computed(() => Boolean(schema.value))
 function requireSchema(): ResourceSchema | null {
@@ -59,12 +65,32 @@ const deviceOptions = ref<RecordRow[]>([])
 const accountOptions = ref<RecordRow[]>([])
 const ruleOptions = ref<RecordRow[]>([])
 const deleteDialog = ref(false)
+const detailDialog = ref(false)
+const detailRow = ref<RecordRow | null>(null)
 const deletingRow = ref<RecordRow | null>(null)
 const deleting = ref(false)
 const pageSize = 20
-const canAdd = computed(() => schemaReady.value && session.can(schemaArea.value === 'archive' ? 'archive:add' : 'billing:add'))
-const canEdit = computed(() => schemaReady.value && session.can(schemaArea.value === 'archive' ? 'archive:edit' : 'billing:edit'))
-const canDelete = computed(() => schemaReady.value && session.can(schemaArea.value === 'archive' ? 'archive:delete' : 'billing:delete'))
+const pageCount = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
+const pageWindow = computed(() => {
+  const start = Math.max(1, Math.min(pageNum.value - 2, Math.max(1, pageCount.value - 4)))
+  const end = Math.min(pageCount.value, start + 4)
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index)
+})
+function changePage(next: number) {
+  pageNum.value = Math.min(pageCount.value, Math.max(1, next))
+  void load()
+}
+const routeText = (value: unknown) => Array.isArray(value) ? String(value[0] ?? '') : String(value ?? '')
+function applyRouteFilters() {
+  keyword.value = routeText(route.query.keyword)
+  orgId.value = routeText(route.query.orgId)
+  gatewayId.value = routeText(route.query.gatewayId)
+  deviceTypeId.value = routeText(route.query.deviceTypeId)
+  accountId.value = routeText(route.query.accountId)
+}
+const canAdd = computed(() => !props.readOnly && schemaReady.value && session.can(schemaArea.value === 'archive' ? 'archive:add' : 'billing:add'))
+const canEdit = computed(() => !props.readOnly && schemaReady.value && session.can(schemaArea.value === 'archive' ? 'archive:edit' : 'billing:edit'))
+const canDelete = computed(() => !props.readOnly && schemaReady.value && session.can(schemaArea.value === 'archive' ? 'archive:delete' : 'billing:delete'))
 const createLabel = computed(() => `+ 新增${schemaTitle.value.replace(/管理$/, '')}`)
 function orgTypeLabel(value: unknown): string {
   switch (Number(value)) {
@@ -180,6 +206,26 @@ const fullColumns = computed<TableColumn[]>(() => {
   rows.value.forEach((row) => Object.keys(row).forEach((key) => keys.add(key)))
   return [...keys].map((key) => ({ key, label: resourceLabel(key, labels.get(key)), format: resourceFormat(key) }))
 })
+const technicalFields = new Set(['id', 'tenant_id', 'contract_id', 'org_id', 'create_by', 'update_by', 'create_time', 'update_time', 'created_by', 'updated_by', 'created_time', 'updated_time'])
+const compactMode = computed(() => props.compact || props.embedded)
+const compactColumns = computed<TableColumn[]>(() => {
+  if (!schema.value) return []
+  return schema.value.columns
+    .filter((column) => !technicalFields.has(column.key))
+    .slice(0, 6)
+    .map((column) => ({ ...column, label: resourceLabel(column.key, column.label), format: resourceFormat(column.key) }))
+})
+const spaceColumns = computed<TableColumn[]>(() => (schema.value?.columns || [])
+  .map((column) => ({ ...column, label: resourceLabel(column.key, column.label), format: resourceFormat(column.key) })))
+const tableColumns = computed(() => schemaResource.value === 'spaces' ? spaceColumns.value : compactMode.value ? compactColumns.value : fullColumns.value)
+const detailEntries = computed(() => detailRow.value ? Object.entries(detailRow.value) : [])
+async function openDetail(row: RecordRow) {
+  detailRow.value = row
+  detailDialog.value = true
+  if (schemaResource.value !== 'spaces') return
+  try { detailRow.value = await getResource(schemaArea.value, schemaResource.value, row.id) }
+  catch (e) { error.value = e instanceof Error ? e.message : '空间详情读取失败' }
+}
 function copy(target: Record<string, string | number>, source: RecordRow) { Object.keys(target).forEach((key) => delete target[key]); Object.assign(target, Object.fromEntries(Object.entries(source).map(([key, value]) => [key, typeof value === 'number' ? value : String(value ?? '')]))) }
 const showOrgFilter = computed(() => ['gateways', 'devices', 'accounts'].includes(schemaResource.value))
 const showGatewayFilter = computed(() => schemaResource.value === 'devices')
@@ -241,16 +287,17 @@ async function runParseTest() { try { selected.value = await parsePoints({ devic
 async function openBatch(row: RecordRow) { try { batchTypeId.value = row.id; batchText.value = JSON.stringify(await deviceTypePoints(row.id), null, 2); batchDialog.value = true } catch (e) { error.value = e instanceof Error ? e.message : '测点配置读取失败' } }
 async function saveBatch() { if (!batchTypeId.value) return; try { await saveDeviceTypePoints(batchTypeId.value, JSON.parse(batchText.value) as RecordRow); batchDialog.value = false } catch (e) { error.value = e instanceof Error ? e.message : '批量测点保存失败' } }
 function reset() { keyword.value = ''; orgId.value = ''; gatewayId.value = ''; deviceTypeId.value = ''; accountId.value = ''; pageNum.value = 1; load() }
-watch(() => route.fullPath, () => { reset(); loadLookups() }); onMounted(() => { load(); loadLookups() })
+watch(() => route.fullPath, () => { pageNum.value = 1; applyRouteFilters(); void load(); void loadLookups() }); onMounted(() => { applyRouteFilters(); void load(); void loadLookups() })
 </script>
 <template>
-  <section v-if="schemaReady" class="view-page resource-page"><header class="view-head"><div><p class="eyebrow">{{ schemaArea.toUpperCase() }} CONFIGURATION</p><h1>{{ schemaTitle }}</h1><p>{{ schemaDescription }}</p></div></header>
-    <FilterBar v-model:keyword="keyword" :busy="loading" :show-reset="false" @query="load" @reset="reset"><label v-if="showOrgFilter" class="field inline"><span>所属组织</span><select v-model="orgId"><option value="">全部组织</option><option v-for="org in orgOptions" :key="String(org.id)" :value="String(org.id)">{{ org.org_name }}</option></select></label><label v-if="showGatewayFilter" class="field inline"><span>接入网关</span><select v-model="gatewayId"><option value="">全部网关</option><option v-for="gateway in gatewayOptions" :key="String(gateway.id)" :value="String(gateway.id)">{{ gateway.gateway_name || gateway.gateway_sn }}</option></select></label><label v-if="showTypeFilter" class="field inline"><span>设备类型</span><select v-model="deviceTypeId"><option value="">全部类型</option><option v-for="type in typeOptions" :key="String(type.id)" :value="String(type.id)">{{ type.type_name || type.type_code }}</option></select></label><label v-if="showAccountFilter" class="field inline"><span>计费账户</span><select v-model="accountId"><option value="">全部账户</option><option v-for="account in accountOptions" :key="String(account.id)" :value="String(account.id)">{{ account.account_name }}</option></select></label><template #actions><button v-if="schemaResource === 'point-mappings' && canEdit" class="quiet" @click="parseDialog = true">解析测试</button><button v-if="canAdd" class="primary add-action" @click="openCreate">{{ createLabel }}</button><button class="icon-btn" title="刷新" aria-label="刷新" @click="load"><RefreshCw :size="16" /></button></template></FilterBar>
-    <AppDataTable :columns="fullColumns" :rows="rows" :loading="loading" :error="error" @refresh="load"><template #cell-online_status="{ value }"><StatusTag domain="online" :value="value" /></template><template #cell-status="{ value }"><StatusTag domain="online" :value="value" /></template><template #cell-enabled="{ value }"><StatusTag domain="online" :value="value" /></template><template #actions="{ row }"><button v-if="schemaResource === 'point-mappings' && canEdit" class="icon-btn" title="解析测试" aria-label="解析测试" @click="parseDialog = true"><Settings :size="16" /></button><button v-if="canEdit" class="icon-btn" title="编辑" aria-label="编辑" @click="openEdit(row)"><Pencil :size="16" /></button><button v-if="canDelete" class="icon-btn danger-text" title="删除" aria-label="删除" @click="openDelete(row)"><Trash2 :size="16" /></button></template></AppDataTable>
-    <div v-if="total > pageSize" class="pagination"><button class="quiet" :disabled="pageNum <= 1" @click="pageNum--; load()">上一页</button><span>第 {{ pageNum }} 页，共 {{ total }} 条</span><button class="quiet" :disabled="rows.length < pageSize" @click="pageNum++; load()">下一页</button></div>
+  <section v-if="schemaReady" class="view-page resource-page"><header v-if="!props.embedded" class="view-head"><div><p class="eyebrow">{{ schemaArea.toUpperCase() }} CONFIGURATION</p><h1>{{ schemaTitle }}</h1></div></header>
+    <FilterBar v-model:keyword="keyword" :busy="loading" :show-reset="false" @query="load" @reset="reset"><label v-if="showOrgFilter" class="field inline"><span>所属组织</span><AppSelect v-model="orgId"><option value="">全部组织</option><option v-for="org in orgOptions" :key="String(org.id)" :value="String(org.id)">{{ org.org_name }}</option></AppSelect></label><label v-if="showGatewayFilter" class="field inline"><span>接入网关</span><AppSelect v-model="gatewayId"><option value="">全部网关</option><option v-for="gateway in gatewayOptions" :key="String(gateway.id)" :value="String(gateway.id)">{{ gateway.gateway_name || gateway.gateway_sn }}</option></AppSelect></label><label v-if="showTypeFilter" class="field inline"><span>设备类型</span><AppSelect v-model="deviceTypeId"><option value="">全部类型</option><option v-for="type in typeOptions" :key="String(type.id)" :value="String(type.id)">{{ type.type_name || type.type_code }}</option></AppSelect></label><label v-if="showAccountFilter" class="field inline"><span>计费账户</span><AppSelect v-model="accountId"><option value="">全部账户</option><option v-for="account in accountOptions" :key="String(account.id)" :value="String(account.id)">{{ account.account_name }}</option></AppSelect></label><template #actions><button v-if="schemaResource === 'point-mappings' && canEdit" class="quiet" @click="parseDialog = true">解析测试</button><button v-if="canAdd" class="primary add-action" @click="openCreate">{{ createLabel }}</button><button class="icon-btn" title="刷新" aria-label="刷新" @click="load"><RefreshCw :size="16" /></button></template></FilterBar>
+    <AppDataTable :columns="tableColumns" :rows="rows" :loading="loading" :error="error" :compact="compactMode" @refresh="load"><template #cell-online_status="{ value }"><StatusTag domain="online" :value="value" /></template><template #cell-status="{ value }"><StatusTag domain="online" :value="value" /></template><template #cell-enabled="{ value }"><StatusTag domain="online" :value="value" /></template><template #actions="{ row }"><button v-if="compactMode || schemaResource === 'spaces'" class="icon-btn" title="查看完整信息" aria-label="查看完整信息" @click="openDetail(row)"><Eye :size="16" /></button><button v-if="schemaResource === 'point-mappings' && canEdit" class="icon-btn" title="解析测试" aria-label="解析测试" @click="parseDialog = true"><Settings :size="16" /></button><button v-if="canEdit" class="icon-btn" title="编辑" aria-label="编辑" @click="openEdit(row)"><Pencil :size="16" /></button><button v-if="canDelete" class="icon-btn danger-text" title="删除" aria-label="删除" @click="openDelete(row)"><Trash2 :size="16" /></button></template></AppDataTable>
+    <div v-if="total > pageSize" class="table-pagination"><span>共 {{ total }} 条</span><button class="quiet" :disabled="pageNum <= 1" @click="changePage(pageNum - 1)">上一页</button><button v-for="item in pageWindow" :key="item" class="page-number" :class="{ active: item === pageNum }" @click="changePage(item)">{{ item }}</button><button class="quiet" :disabled="pageNum >= pageCount" @click="changePage(pageNum + 1)">下一页</button></div>
     <AppDrawer :open="Boolean(selected)" title="解析测试结果" @update:open="(open) => { if (!open) selected = null }"><pre>{{ JSON.stringify(selected, null, 2) }}</pre></AppDrawer>
-    <AppDialog v-model:open="dialog" :title="editingId ? `编辑${schemaTitle}` : `新增${schemaTitle}`" :saving="saving" @submit="save"><div class="dialog-fields"><label v-for="field in schemaFields" :key="field.key" class="dialog-field" :class="{ full: field.type === 'textarea' }"><span>{{ field.label }}<i v-if="field.required">*</i></span><textarea v-if="field.type === 'textarea'" v-model="form[field.key]"></textarea><select v-else-if="field.type === 'select' || fieldOptions(field.key).length" v-model="form[field.key]"><option v-for="option in (field.type === 'select' ? field.options || [] : fieldOptions(field.key))" :key="String(option.value)" :value="option.value">{{ option.label }}</option></select><input v-else v-model="form[field.key]" :type="field.type || 'text'" :required="field.required"></label></div></AppDialog>
-    <AppDialog v-model:open="parseDialog" title="协议映射解析测试" @submit="runParseTest"><div class="dialog-fields"><label class="dialog-field"><span>设备类型</span><select v-model="parseForm.deviceTypeId"><option value="">无</option><option v-for="type in typeOptions" :key="String(type.id)" :value="String(type.id)">{{ type.type_name || type.type_code }}</option></select></label><label class="dialog-field full"><span>JSON 示例报文</span><textarea v-model="parseForm.samplePayload" spellcheck="false"></textarea></label></div></AppDialog>
+    <AppDialog v-model:open="detailDialog" :title="`${schemaTitle}详情`" eyebrow="BUSINESS RECORD" hide-actions dialog-class="business-record-dialog"><dl class="detail-grid dialog-detail-grid"><template v-for="([key, value]) in detailEntries" :key="key"><dt>{{ resourceLabel(key) }}</dt><dd>{{ value === null || value === undefined || value === '' ? '—' : value }}</dd></template></dl></AppDialog>
+    <AppDialog v-model:open="dialog" :title="editingId ? `编辑${schemaTitle}` : `新增${schemaTitle}`" :saving="saving" @submit="save"><div class="dialog-fields"><label v-for="field in schemaFields" :key="field.key" class="dialog-field" :class="{ full: field.type === 'textarea' }"><span>{{ field.label }}<i v-if="field.required">*</i></span><textarea v-if="field.type === 'textarea'" v-model="form[field.key]"></textarea><AppSelect v-else-if="field.type === 'select' || fieldOptions(field.key).length" v-model="form[field.key]"><option v-for="option in (field.type === 'select' ? field.options || [] : fieldOptions(field.key))" :key="String(option.value)" :value="option.value">{{ option.label }}</option></AppSelect><input v-else v-model="form[field.key]" :type="field.type || 'text'" :required="field.required"></label></div></AppDialog>
+    <AppDialog v-model:open="parseDialog" title="协议映射解析测试" @submit="runParseTest"><div class="dialog-fields"><label class="dialog-field"><span>设备类型</span><AppSelect v-model="parseForm.deviceTypeId"><option value="">无</option><option v-for="type in typeOptions" :key="String(type.id)" :value="String(type.id)">{{ type.type_name || type.type_code }}</option></AppSelect></label><label class="dialog-field full"><span>JSON 示例报文</span><textarea v-model="parseForm.samplePayload" spellcheck="false"></textarea></label></div></AppDialog>
     <AppDialog v-model:open="batchDialog" title="批量配置设备类型测点" @submit="saveBatch"><div class="dialog-fields"><label class="dialog-field full"><span>批量配置 JSON</span><textarea v-model="batchText" spellcheck="false"></textarea></label></div></AppDialog>
     <AppConfirmDialog v-model:open="deleteDialog" :title="`删除${schemaTitle}`" message="确认删除后将立即调用后端删除接口，且无法恢复。" :loading="deleting" confirm-text="确认删除" @confirm="confirmDelete" />
   </section>
@@ -259,7 +306,6 @@ watch(() => route.fullPath, () => { reset(); loadLookups() }); onMounted(() => {
       <div>
         <p class="eyebrow">RESOURCE CONFIGURATION</p>
         <h1>未配置资源</h1>
-        <p>{{ schemaDescription }}</p>
       </div>
     </header>
   </section>

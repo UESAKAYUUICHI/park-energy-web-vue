@@ -53,10 +53,10 @@ onMounted(load)
 
 <template>
   <section class="view-page business-workspace">
-    <div class="view-head"><div><p class="eyebrow">ROLE WORKSPACE</p><h1>{{ title }}</h1><p>按当前账号的数据范围聚合任务、状态和业务对象。</p></div><button class="quiet" type="button" :disabled="loading" title="刷新" @click="load"><RefreshCw :size="15" />刷新</button></div>
+    <div class="view-head"><div><p class="eyebrow">ROLE WORKSPACE</p><h1>{{ title }}</h1></div><button class="quiet" type="button" :disabled="loading" title="刷新" @click="load"><RefreshCw :size="15" />刷新</button></div>
     <p v-if="error" class="notice">{{ error }}</p>
     <div v-if="metricItems.length" class="metric-grid"><article v-for="metric in metricItems" :key="metric.key" class="metric"><span>{{ label(metric.key) }}</span><strong>{{ display(metric.key, metric.value) }}</strong></article></div>
-    <div v-if="loading" class="empty-state">正在读取工作台数据...</div>
+    <AppLoadingState v-if="loading" />
     <div v-else class="workspace-sections"><article v-for="section in sections" :key="section.key" class="panel"><div class="panel-head"><b>{{ section.title }}</b><span>{{ rows(section.key).length }} 条</span></div><div class="table-scroll"><table><thead><tr><th v-for="column in section.columns" :key="column">{{ label(column) }}</th></tr></thead><tbody><tr v-for="(row, index) in rows(section.key).slice(0, 12)" :key="String(row.id || index)"><td v-for="column in section.columns" :key="column"><StatusTag v-if="['online_status','deal_status','pay_status'].includes(column)" :domain="column === 'online_status' ? 'online' : column === 'deal_status' ? 'alarm' : 'bill'" :value="row[column]" /><span v-else>{{ display(column, row[column]) }}</span></td></tr><tr v-if="!rows(section.key).length"><td :colspan="section.columns.length" class="empty-cell">暂无数据</td></tr></tbody></table></div></article></div>
   </section>
 </template>

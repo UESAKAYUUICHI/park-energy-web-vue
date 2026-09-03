@@ -244,7 +244,6 @@ onBeforeUnmount(() => {
       <div>
         <p class="eyebrow">RBAC WORKBENCH</p>
         <h1>模块权限分配</h1>
-        <p>用户角色权限分配。</p>
       </div>
       <button class="icon-btn" :disabled="loading || saving" title="刷新" aria-label="刷新" @click="load"><RefreshCw :size="17" /></button>
     </header>
@@ -258,7 +257,7 @@ onBeforeUnmount(() => {
           <Search :size="14" />
           <input :value="userKeyword" placeholder="搜索用户" @input="onSearchInput('user', ($event.target as HTMLInputElement).value)" @keydown.enter.prevent="runSearch('user')">
         </label>
-        <div v-if="loading" class="empty-state">正在读取用户...</div>
+        <AppLoadingState v-if="loading" />
         <div v-else class="rbac-list">
           <button v-for="user in filteredUsers" :key="String(user.id)" class="rbac-item" :class="{ active: sameId(user.id, selectedUserId) }" @click="selectUser(user)">
             <b>{{ user.nickname || user.username }}</b>
