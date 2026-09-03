@@ -37,10 +37,10 @@ watch(() => props.node, () => { if (!children.value.length) expanded.value = fal
       <span class="org-scope-icon"><Building2 :size="14" /></span>
       <b>{{ label }}</b>
       <small>{{ checked ? modeLabel : '未绑定' }}</small>
-      <select :value="mode" :disabled="!checked || disabled" @change="emit('mode', node.id, ($event.target as HTMLSelectElement).value as ScopeMode)">
+      <AppSelect :value="mode" :disabled="!checked || disabled" @change="emit('mode', node.id, ($event.target as HTMLSelectElement).value as ScopeMode)">
         <option value="SELF">仅本组织</option>
         <option value="SUBTREE">含下级</option>
-      </select>
+      </AppSelect>
     </div>
     <div v-if="expanded && children.length" class="org-scope-tree-children">
       <OrgScopeTreeNode v-for="child in children" :key="String(child.key || child.id)" :node="child" :depth="Number(depth || 0) + 1" :checked="Boolean(checkedMap[String(child.id)])" :mode="modeMap[String(child.id)] || 'SELF'" :checked-map="checkedMap" :mode-map="modeMap" :disabled="disabled" @toggle="emit('toggle', $event)" @mode="forwardMode" />
