@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import AppLoadingState from '@/components/app/AppLoadingState.vue'
 import type { RecordRow } from '@/types/domain'
 
 export interface TableColumn {
@@ -19,12 +20,14 @@ const props = withDefaults(defineProps<{
   pageSize?: number
   pageable?: boolean
   hideActions?: boolean
+  compact?: boolean
   total?: number
   currentPage?: number
 }>(), { pageSize: 10, pageable: true, hideActions: false, total: undefined, currentPage: undefined })
 
 const emit = defineEmits<{ refresh: []; detail: [row: RecordRow]; 'page-change': [page: number] }>()
 const page = ref(1)
+const contentRevision = ref(0)
 const isServerPage = computed(() => props.total !== undefined && props.currentPage !== undefined)
 const activePage = computed(() => isServerPage.value ? props.currentPage || 1 : page.value)
 const totalRows = computed(() => isServerPage.value ? props.total || 0 : props.rows.length)
@@ -40,6 +43,9 @@ const showPagination = computed(() => props.pageable && props.rows.length > 0)
 
 watch(() => props.rows, () => { page.value = 1 })
 watch(pageCount, (count) => { if (page.value > count) page.value = count })
+watch(() => props.loading, (loading, wasLoading) => {
+  if (!loading && wasLoading) contentRevision.value += 1
+})
 
 const valueOf = (row: RecordRow, column: TableColumn) => {
   if (column.format) return column.format(row[column.key], row)
@@ -58,13 +64,15 @@ const nextPage = () => goPage(activePage.value + 1)
 </script>
 
 <template>
-  <article class="table-panel app-table">
+  <article class="table-panel app-table" :class="{ 'is-compact': compact }">
     <div v-if="title" class="table-tools"><h3>{{ title }}</h3><slot name="toolbar"></slot></div>
-    <div v-if="loading" class="empty-state">正在读取 Platform 数据…</div>
+    <AppLoadingState v-if="loading" />
     <div v-else-if="!rows.length" class="empty-state">{{ emptyText || '当前条件下暂无数据。' }}</div>
-    <template v-else>
-      <div class="table-scroll"><table class="data-table" :class="{ 'has-actions': !hideActions }"><thead><tr><th v-for="column in visibleColumns" :key="column.key" :style="{ width: column.width }">{{ column.label }}</th><th v-if="!hideActions"><slot name="action-title">操作</slot></th></tr></thead><tbody><tr v-for="row in visibleRows" :key="String(row.id || row.command_id || row.bill_no)"><td v-for="column in visibleColumns" :key="column.key"><slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]">{{ valueOf(row, column) }}</slot></td><td v-if="!hideActions" class="row-actions"><slot name="actions" :row="row"><button class="link-btn" @click="emit('detail', row)">详情</button></slot></td></tr></tbody></table></div>
+    <Transition v-else name="data-content" appear>
+      <div :key="contentRevision" class="data-content">
+      <div class="table-scroll"><table class="data-table" :class="{ 'has-actions': !hideActions }"><thead><tr><th v-for="column in visibleColumns" :key="column.key" :style="{ width: column.width }">{{ column.label }}</th><th v-if="!hideActions"><slot name="action-title">操作</slot></th></tr></thead><tbody><tr v-for="row in visibleRows" :key="String(row.id || row.command_id || row.bill_no)"><td v-for="column in visibleColumns" :key="column.key" :data-label="column.label" :title="String(valueOf(row, column))"><slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]">{{ valueOf(row, column) }}</slot></td><td v-if="!hideActions" class="row-actions" data-label="操作"><slot name="actions" :row="row"><button class="link-btn" @click="emit('detail', row)">详情</button></slot></td></tr></tbody></table></div>
       <div v-if="showPagination" class="table-pagination"><span>共 {{ totalRows }} 条</span><button class="quiet" :disabled="activePage <= 1" @click="previousPage">上一页</button><button v-for="item in pageWindow" :key="item" class="page-number" :class="{ active: item === activePage }" @click="goPage(item)">{{ item }}</button><button class="quiet" :disabled="activePage >= pageCount" @click="nextPage">下一页</button></div>
-    </template>
+      </div>
+    </Transition>
   </article>
 </template>

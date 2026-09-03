@@ -1,0 +1,775 @@
+/* Must be loaded last: common interaction components win over feature-page CSS. */
+.app-select { position: relative; display: block; min-width: 0; color: #50627a; }
+.app-select-trigger { width: 100%; min-height: 36px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 11px; border: 1px solid #c7d6e8; border-radius: 8px; background: #fff; color: inherit; box-shadow: 0 1px 2px rgb(23 55 92 / 5%); outline: 0; text-align: left; transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease; }
+.app-select:hover .app-select-trigger { border-color: #a8c3e5; background: #fcfdff; }
+.app-select.open .app-select-trigger, .app-select:focus-within .app-select-trigger { border-color: #78a9e9; box-shadow: 0 0 0 3px rgb(76 141 255 / 11%); outline: 0; }
+.app-select.disabled .app-select-trigger { background: #f5f8fb; color: #98a8ba; cursor: not-allowed; }
+.app-select-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-select-value.placeholder { color: #98a8ba; }
+.app-select-arrow { flex: none; color: #71839a; transition: transform .18s ease; }
+.app-select.open .app-select-arrow { transform: rotate(180deg); }
+.app-select-menu { position: absolute; z-index: 80; top: calc(100% + 7px); left: 0; display: grid; width: max-content; min-width: 100%; max-width: min(360px, calc(100vw - 32px)); max-height: 256px; padding: 6px; overflow: auto; border: 1px solid #8eb8ec; border-radius: 8px; background: #fff; box-shadow: 0 14px 28px rgb(23 55 92 / 16%); scrollbar-width: none; }
+.app-select-menu::-webkit-scrollbar { display: none; }
+.app-select-option { min-height: 34px; padding: 0 10px; border: 0; border-radius: 5px; background: transparent; color: #314e70; text-align: left; white-space: nowrap; }
+.app-select-option:hover, .app-select-option.active { background: #edf5ff; color: #2569bd; }
+.app-select-option:disabled { color: #9ba9b8; cursor: not-allowed; }
+.app-select-menu-enter-active, .app-select-menu-leave-active { transition: opacity .16s ease, transform .16s ease; }
+.app-select-menu-enter-from, .app-select-menu-leave-to { opacity: 0; transform: translateY(-4px); }
+
+/* Loading is now component-owned; empty data must never be mistaken for a loading state. */
+.app-table > .empty-state, .order-table-body > .empty-state, .alarm-event-main > .empty-state { font-size: 12px; }
+.app-table > .empty-state::before, .app-table > .empty-state::after, .order-table-body > .empty-state::before, .order-table-body > .empty-state::after, .alarm-event-main > .empty-state::before, .alarm-event-main > .empty-state::after { display: none; content: none; }
+
+.field > .app-select, .dialog-field > .app-select, .enterprise-field > .app-select, .operations-field > .app-select, .sidebar-section > .app-select, .point-manage-card .app-select, .point-editor-fields .app-select, .catalog-table .app-select { width: 100%; }
+.order-query-bar > .app-select { width: 170px; flex: none; }
+.template-filter-bar > .app-select { width: 150px; flex: none; }
+.org-scope-tree-row > .app-select, .org-scope-node > .app-select { width: 112px; flex: none; }
+
+/* The work-order workspace has a dedicated bottom bar, not a generic table pager. */
+.work-order-pagination { flex: none; min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 14px; border-top: 1px solid var(--border); background: #fff; color: var(--muted); font: 12px ui-monospace, Consolas, monospace; }
+.work-order-total { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-order-page-controls { display: flex; align-items: center; gap: 8px; flex: none; }
+.work-order-page-controls b { min-width: 44px; color: #50627a; font: inherit; text-align: center; }
+.work-order-page-controls .quiet { height: 30px; padding: 0 11px; }
+@media (max-width: 640px) { .work-order-pagination { align-items: stretch; flex-direction: column; } .work-order-page-controls { justify-content: flex-end; } }
+
+/* Shared enterprise button motion: clear feedback without turning the console into a consumer app. */
+button:not(.icon-btn):not(.bare-icon):not(.close-icon):not(.close):not(.tree-toggle):not(.catalog-tree-detail):not(.catalog-tree-action) { transition: color .16s ease, background-color .16s ease, border-color .16s ease, box-shadow .16s ease, transform .14s ease; }
+button:not(.icon-btn):not(.bare-icon):not(.close-icon):not(.close):not(.tree-toggle):not(.catalog-tree-detail):not(.catalog-tree-action):focus-visible { outline: 0; box-shadow: 0 0 0 3px rgb(76 141 255 / 14%); }
+
+button.primary:not(:disabled), button.btn-primary:not(:disabled), button.primary.add-action:not(:disabled) { box-shadow: 0 2px 5px rgb(29 100 191 / 14%); }
+button.primary:not(:disabled):hover, button.btn-primary:not(:disabled):hover, button.primary.add-action:not(:disabled):hover { transform: translateY(-1px); background-color: #216fc8; box-shadow: 0 6px 14px rgb(29 100 191 / 22%); }
+button.primary:not(:disabled):active, button.btn-primary:not(:disabled):active, button.primary.add-action:not(:disabled):active { transform: translateY(0) scale(.985); box-shadow: 0 2px 5px rgb(29 100 191 / 14%); }
+
+button.quiet:not(:disabled):hover, button.page-number:not(:disabled):hover { border-color: #9abde7; background-color: #f5f9ff; color: #2768ba; box-shadow: 0 2px 7px rgb(39 104 186 / 9%); }
+button.quiet:not(:disabled):active, button.page-number:not(:disabled):active { transform: scale(.985); box-shadow: none; }
+button.danger:not(:disabled):hover, button.danger-text:not(:disabled):hover { border-color: #efb1a3; background-color: #fff1ee; color: #bc4d32 !important; box-shadow: 0 2px 7px rgb(188 77 50 / 8%); }
+button.danger:not(:disabled):active, button.danger-text:not(:disabled):active { transform: scale(.985); }
+
+button.link-btn:not(:disabled):hover, button.inline-action:not(:disabled):hover { border-color: #9fc2ec; background-color: #f1f7ff; color: #2368be; }
+button.link-btn:not(:disabled):active, button.inline-action:not(:disabled):active { transform: scale(.985); }
+
+.tabs a, .center-tabs button, .operations-tabs button, .order-status-tabs button, .inspection-subtabs button, .catalog-mode-tabs button, .catalog-version-bar button, .archive-tabs button, .archive-history-tabs button, .device-workspace-tabs .quiet { transition: color .16s ease, background-color .16s ease, border-color .16s ease, box-shadow .16s ease; }
+.tabs a:hover, .center-tabs button:hover, .operations-tabs button:hover, .order-status-tabs button:hover, .inspection-subtabs button:hover, .catalog-mode-tabs button:hover, .catalog-version-bar button:hover, .archive-tabs button:hover, .archive-history-tabs button:hover, .device-workspace-tabs .quiet:hover { transform: none; }
+
+.account-choice, .business-flow-steps button, .task-inbox-list button { transition: color .16s ease, background-color .16s ease, border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+.account-choice:hover, .business-flow-steps button:hover { transform: translateY(-1px); }
+.task-inbox-list button:hover { transform: none; }
+.app-select-option { transition: color .14s ease, background-color .14s ease; }
+
+@media (prefers-reduced-motion: reduce) {
+  button, .account-choice, .business-flow-steps button, .task-inbox-list button, .tabs a, .app-select-option { transition: none !important; }
+  button:not(:disabled):hover, button:not(:disabled):active, .account-choice:hover, .business-flow-steps button:hover { transform: none !important; }
+}
+
+/* Native option popups are controlled by the browser/OS. The trigger remains consistently styled. */
+.drawer-scroll-hidden, .dialog-scroll-hidden, .drawer, .dialog, .table-scroll,
+.dialog-fields, .dialog-detail-grid, .timeline, .timeline-list, .operation-timeline,
+.work-order-log, .work-order-timeline, .alarm-action-timeline, .alarm-timeline,
+.inspection-plan-dialog .dialog-fields,
+.alarm-rule-dialog .dialog-fields {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.drawer-scroll-hidden::-webkit-scrollbar, .dialog-scroll-hidden::-webkit-scrollbar,
+.drawer::-webkit-scrollbar, .dialog::-webkit-scrollbar, .table-scroll::-webkit-scrollbar,
+.dialog-fields::-webkit-scrollbar, .dialog-detail-grid::-webkit-scrollbar,
+.timeline::-webkit-scrollbar, .timeline-list::-webkit-scrollbar,
+.operation-timeline::-webkit-scrollbar, .work-order-log::-webkit-scrollbar,
+.work-order-timeline::-webkit-scrollbar, .alarm-action-timeline::-webkit-scrollbar,
+.alarm-timeline::-webkit-scrollbar, .inspection-plan-dialog .dialog-fields::-webkit-scrollbar,
+.alarm-rule-dialog .dialog-fields::-webkit-scrollbar { display: none; }
+
+.app-loading-state {
+  min-height: 170px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 28px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.app-loading-spinner {
+  width: 26px;
+  height: 26px;
+  border: 3px solid #dce8f7;
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: app-loading-spin .75s linear infinite;
+}
+@keyframes app-loading-spin { to { transform: rotate(360deg); } }
+
+.app-table > .data-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.app-table > .data-content > .table-scroll { flex: 1; min-height: 0; }
+.data-content-enter-active { transition: opacity .24s ease, transform .24s ease; }
+.data-content-enter-from { opacity: 0; transform: translateY(6px); }
+
+/* 设备树：历史/报警与设备信息同级展示，数据区只在自身内部滚动。 */
+.archive-main-panel > .archive-device-data-panel {
+  flex: 1;
+  min-height: 0;
+  margin-top: 14px;
+}
+.archive-device-data-panel .archive-device-data-body,
+.archive-device-data-panel .archive-chart-shell {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.archive-device-data-panel .archive-history-chart,
+.archive-device-data-panel .archive-data-table {
+  flex: 1;
+  min-height: 0;
+}
+.archive-device-data-panel .archive-data-table {
+  overflow: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.archive-device-data-panel .archive-data-table::-webkit-scrollbar { display: none; }
+
+/* 财务 ERP 右侧工作区和业务单据弹窗：保留滚动能力，但隐藏视觉滚动条。 */
+.workspace-fixed,
+.workspace-fixed .view-page,
+.workspace-fixed .erp-stage-body,
+.workspace-fixed .erp-table-main,
+.workspace-fixed .erp-action-panel,
+.subject-records-dialog .dialog-content,
+.erp-detail-dialog .dialog-content,
+.erp-operation-dialog .dialog-content,
+.contract-document-dialog .dialog-content,
+.finance-document-dialog .dialog-content,
+.receivable-dialog-view,
+.receivable-dialog-view .billing-wizard,
+.receivable-dialog-view .view-page,
+.finance-document,
+.contract-document-layout {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.workspace-fixed::-webkit-scrollbar,
+.workspace-fixed .view-page::-webkit-scrollbar,
+.workspace-fixed .erp-stage-body::-webkit-scrollbar,
+.workspace-fixed .erp-table-main::-webkit-scrollbar,
+.workspace-fixed .erp-action-panel::-webkit-scrollbar,
+.subject-records-dialog .dialog-content::-webkit-scrollbar,
+.erp-detail-dialog .dialog-content::-webkit-scrollbar,
+.erp-operation-dialog .dialog-content::-webkit-scrollbar,
+.contract-document-dialog .dialog-content::-webkit-scrollbar,
+.finance-document-dialog .dialog-content::-webkit-scrollbar,
+.receivable-dialog-view::-webkit-scrollbar,
+.receivable-dialog-view .billing-wizard::-webkit-scrollbar,
+.receivable-dialog-view .view-page::-webkit-scrollbar,
+.finance-document::-webkit-scrollbar,
+.contract-document-layout::-webkit-scrollbar {
+  display: none;
+}
+
+/* 财务单据化弹窗：局部 scoped CSS 无法稳定覆盖 AppSelect 等子组件，这里统一兜底成 ERP 单据样式。 */
+.contract-document-dialog,
+.finance-document-dialog {
+  width: min(1180px, calc(100vw - 42px)) !important;
+  max-height: min(880px, calc(100vh - 36px)) !important;
+  overflow: hidden !important;
+}
+.finance-document-dialog { width: min(1080px, calc(100vw - 42px)) !important; }
+.contract-document-dialog .dialog-content,
+.finance-document-dialog .dialog-content {
+  padding: 0 !important;
+  background:
+    radial-gradient(circle at 18% 0, rgb(47 123 208 / 8%), transparent 34%),
+    linear-gradient(180deg, #f7faff 0%, #eef4fb 100%) !important;
+}
+.contract-document-dialog .dialog-content > .tip,
+.finance-document-dialog .dialog-content > .tip {
+  margin: 16px 24px 0 !important;
+  border-color: #d8e6f6 !important;
+  background: #ffffffd9 !important;
+}
+.contract-document-layout,
+.finance-document {
+  width: auto !important;
+  max-height: calc(100vh - 220px) !important;
+  margin: 18px 24px 24px !important;
+  padding: 0 !important;
+  grid-template-columns: minmax(0, 1fr) 274px !important;
+  align-items: start !important;
+  gap: 18px !important;
+}
+.contract-paper,
+.finance-paper {
+  position: relative !important;
+  overflow: hidden !important;
+  min-width: 0 !important;
+  padding: 32px 34px !important;
+  border: 1px solid #c9d9eb !important;
+  border-radius: 16px !important;
+  background:
+    linear-gradient(90deg, rgb(41 113 197 / 4%) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(#ffffff, #fbfdff) !important;
+  box-shadow: 0 18px 42px rgb(31 64 104 / 13%) !important;
+  color: #213852 !important;
+}
+.contract-paper::before,
+.finance-paper::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 5px;
+  background: linear-gradient(90deg, #135aa5, #2d82d7 55%, #8dbdef);
+}
+.contract-paper header,
+.finance-paper header {
+  position: relative !important;
+  margin: 0 0 22px !important;
+  padding: 4px 0 20px !important;
+  border-bottom: 1px solid #dfe9f5 !important;
+  text-align: center !important;
+}
+.contract-paper header::after,
+.finance-paper header::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -1px;
+  width: 92px;
+  height: 3px;
+  border-radius: 999px;
+  background: #2f7bd0;
+  transform: translateX(-50%);
+}
+.contract-paper header p,
+.finance-paper header p {
+  color: #1f6fbe !important;
+  font: 800 11px ui-monospace, Consolas, monospace !important;
+  letter-spacing: .22em !important;
+}
+.contract-paper h2,
+.finance-paper h2 {
+  color: #102a46 !important;
+  font: 800 28px/1.2 "Noto Serif SC", "Songti SC", Georgia, serif !important;
+  letter-spacing: .04em !important;
+}
+.contract-code {
+  padding: 8px 12px !important;
+  border: 1px dashed #bfd2e8 !important;
+  border-radius: 999px !important;
+  background: #f8fbff !important;
+}
+.contract-clause,
+.finance-clause {
+  position: relative !important;
+  margin-top: 16px !important;
+  padding: 15px 16px 16px 18px !important;
+  border: 1px solid #dbe7f4 !important;
+  border-left: 4px solid #2f7bd0 !important;
+  border-radius: 13px !important;
+  background: linear-gradient(180deg, #fbfdff, #f7fbff) !important;
+}
+.contract-clause h3,
+.finance-clause h3 {
+  margin: 0 0 10px !important;
+  color: #173653 !important;
+  font-size: 14px !important;
+  font-weight: 800 !important;
+}
+.contract-clause p,
+.finance-clause p {
+  margin: 7px 0 !important;
+  color: #435d7b !important;
+  font-size: 14px !important;
+  line-height: 2.35 !important;
+}
+.contract-clause input,
+.contract-clause textarea,
+.finance-clause input,
+.finance-clause textarea {
+  min-height: 34px !important;
+  border: 1px solid #c6d8eb !important;
+  border-radius: 8px !important;
+  background: #fff !important;
+  color: #1d3855 !important;
+  box-shadow: inset 0 1px 2px rgb(28 62 98 / 5%) !important;
+}
+.contract-clause p > input,
+.finance-clause p > input,
+.contract-code input {
+  display: inline-block !important;
+  vertical-align: middle !important;
+  height: 34px !important;
+  margin: 0 6px !important;
+  padding: 0 10px !important;
+}
+.contract-clause textarea,
+.finance-clause textarea {
+  min-height: 88px !important;
+  padding: 10px 12px !important;
+  line-height: 1.7 !important;
+}
+.contract-clause .app-select,
+.finance-clause .app-select {
+  display: inline-block !important;
+  width: auto !important;
+  min-width: 220px !important;
+  margin: 0 6px !important;
+  vertical-align: middle !important;
+}
+.finance-clause .app-select { min-width: 240px !important; }
+.contract-clause .app-select-trigger,
+.finance-clause .app-select-trigger {
+  min-height: 34px !important;
+  border-color: #bcd1e8 !important;
+  border-radius: 8px !important;
+  background: #fff !important;
+  color: #1d3855 !important;
+}
+.contract-choice-list,
+.contract-meter-list {
+  display: grid !important;
+  gap: 9px !important;
+}
+.contract-choice-list label,
+.contract-meter-list label,
+.finance-object-card span {
+  border: 1px solid #d6e4f2 !important;
+  border-radius: 10px !important;
+  background: #fff !important;
+  box-shadow: 0 4px 12px rgb(31 64 104 / 5%) !important;
+}
+.contract-choice-list label:hover,
+.contract-meter-list label:hover {
+  border-color: #9fc3ec !important;
+  background: #f6fbff !important;
+}
+.finance-object-card {
+  gap: 10px !important;
+}
+.finance-object-card span {
+  padding: 12px !important;
+}
+.contract-sidecard,
+.finance-sidecard {
+  position: sticky !important;
+  top: 0 !important;
+  padding: 18px !important;
+  border: 1px solid #bfd5ee !important;
+  border-radius: 16px !important;
+  background:
+    linear-gradient(180deg, #ffffff 0%, #f5f9ff 100%) !important;
+  box-shadow: 0 14px 32px rgb(31 64 104 / 11%) !important;
+}
+.contract-sidecard::before,
+.finance-sidecard::before {
+  content: "";
+  display: block;
+  height: 4px;
+  margin: -18px -18px 14px;
+  border-radius: 16px 16px 0 0;
+  background: linear-gradient(90deg, #2f7bd0, #7fb0e8);
+}
+.contract-sidecard > b,
+.finance-sidecard > b {
+  display: inline-flex !important;
+  align-items: center !important;
+  min-height: 24px !important;
+  padding: 0 9px !important;
+  border-radius: 999px !important;
+  background: #eaf3ff !important;
+  color: #276ebf !important;
+  font-size: 11px !important;
+  letter-spacing: .06em !important;
+}
+.contract-sidecard > strong,
+.finance-sidecard > strong {
+  color: #164f91 !important;
+}
+.contract-progress {
+  height: 8px !important;
+  border: 1px solid #d7e6f7 !important;
+  background: #edf4fc !important;
+}
+.contract-progress i {
+  background: linear-gradient(90deg, #2f7bd0, #56a3eb) !important;
+}
+.contract-sidecard li i {
+  flex: none !important;
+}
+.contract-sidecard dl div,
+.finance-sidecard dl div {
+  padding: 7px 0 !important;
+  border-top: 1px dashed #dbe7f4 !important;
+}
+@media (max-width: 920px) {
+  .contract-document-layout,
+  .finance-document {
+    grid-template-columns: 1fr !important;
+    margin: 14px !important;
+  }
+  .contract-sidecard,
+  .finance-sidecard {
+    position: relative !important;
+  }
+  .contract-clause .app-select,
+  .finance-clause .app-select,
+  .contract-clause p > input,
+  .finance-clause p > input {
+    width: 100% !important;
+    margin: 6px 0 !important;
+  }
+}
+
+/* 正式合同/财务单据排版：克制、文书化，弱化后台卡片感。 */
+.contract-document-dialog,
+.finance-document-dialog {
+  width: min(1120px, calc(100vw - 48px)) !important;
+  border-radius: 10px !important;
+}
+.contract-document-dialog .dialog-content,
+.finance-document-dialog .dialog-content {
+  background: #f3f4f6 !important;
+}
+.contract-document-dialog .dialog-content > .tip,
+.finance-document-dialog .dialog-content > .tip {
+  margin: 14px 22px 0 !important;
+  border: 1px solid #ddd !important;
+  background: #fafafa !important;
+  color: #555 !important;
+}
+.contract-document-layout,
+.finance-document {
+  grid-template-columns: minmax(0, 1fr) 238px !important;
+  gap: 16px !important;
+  margin: 16px 22px 22px !important;
+  font-family: "Noto Serif SC", "Songti SC", SimSun, serif !important;
+}
+.contract-paper,
+.finance-paper {
+  padding: 38px 48px 42px !important;
+  border: 1px solid #d8d8d8 !important;
+  border-radius: 3px !important;
+  background: #fff !important;
+  box-shadow: 0 10px 26px rgb(0 0 0 / 8%) !important;
+  color: #222 !important;
+}
+.contract-paper::before,
+.finance-paper::before,
+.contract-paper header::after,
+.finance-paper header::after {
+  display: none !important;
+}
+.contract-paper header,
+.finance-paper header {
+  margin: 0 0 26px !important;
+  padding: 0 0 18px !important;
+  border-bottom: 2px solid #222 !important;
+  text-align: center !important;
+}
+.contract-paper header p,
+.finance-paper header p {
+  margin: 0 0 6px !important;
+  color: #666 !important;
+  font: 700 10px "Times New Roman", serif !important;
+  letter-spacing: .18em !important;
+}
+.contract-paper h2,
+.finance-paper h2 {
+  margin: 0 0 14px !important;
+  color: #111 !important;
+  font: 800 28px/1.35 "Noto Serif SC", "Songti SC", SimSun, serif !important;
+  letter-spacing: .12em !important;
+}
+.contract-code {
+  display: inline-flex !important;
+  gap: 8px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #333 !important;
+  font-size: 13px !important;
+}
+.contract-preamble {
+  margin: 0 0 18px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  color: #222 !important;
+}
+.contract-preamble p {
+  margin: 0 !important;
+  text-indent: 2em !important;
+  color: #222 !important;
+  font-size: 14px !important;
+  line-height: 2.05 !important;
+}
+.contract-clause,
+.finance-clause {
+  margin-top: 18px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #222 !important;
+}
+.contract-clause h3,
+.finance-clause h3 {
+  margin: 0 0 8px !important;
+  color: #111 !important;
+  font: 800 15px/1.7 "Noto Serif SC", "Songti SC", SimSun, serif !important;
+}
+.contract-clause p,
+.finance-clause p {
+  margin: 5px 0 !important;
+  color: #222 !important;
+  font: 400 14px/2.05 "Noto Serif SC", "Songti SC", SimSun, serif !important;
+  text-align: justify !important;
+}
+.contract-clause input,
+.contract-clause textarea,
+.finance-clause input,
+.finance-clause textarea,
+.contract-code input {
+  min-height: 28px !important;
+  border: 0 !important;
+  border-bottom: 1px solid #555 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #111 !important;
+  box-shadow: none !important;
+  font-family: inherit !important;
+  font-size: 14px !important;
+}
+.contract-clause p > input,
+.finance-clause p > input,
+.contract-code input {
+  height: 28px !important;
+  margin: 0 4px !important;
+  padding: 0 4px !important;
+}
+.contract-code input { width: 230px !important; text-align: center !important; }
+.contract-clause textarea,
+.finance-clause textarea {
+  width: 100% !important;
+  min-height: 88px !important;
+  margin-top: 6px !important;
+  padding: 8px 10px !important;
+  border: 1px solid #999 !important;
+  background: #fff !important;
+  line-height: 1.8 !important;
+  resize: vertical !important;
+}
+.contract-clause .app-select,
+.finance-clause .app-select {
+  display: inline-block !important;
+  width: auto !important;
+  min-width: 220px !important;
+  margin: 0 4px !important;
+  font-family: inherit !important;
+}
+.contract-clause .app-select-trigger,
+.finance-clause .app-select-trigger {
+  min-height: 28px !important;
+  padding: 0 18px 0 4px !important;
+  border: 0 !important;
+  border-bottom: 1px solid #555 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #111 !important;
+  font-family: inherit !important;
+}
+.contract-clause .app-select:hover .app-select-trigger,
+.finance-clause .app-select:hover .app-select-trigger,
+.contract-clause .app-select.open .app-select-trigger,
+.finance-clause .app-select.open .app-select-trigger {
+  border-color: #111 !important;
+  background: #fafafa !important;
+  box-shadow: none !important;
+}
+.contract-choice-list,
+.contract-meter-list {
+  gap: 0 !important;
+  margin: 8px 0 4px !important;
+  border-top: 1px solid #e1e1e1 !important;
+}
+.contract-choice-list label,
+.contract-meter-list label,
+.finance-object-card span {
+  min-height: 36px !important;
+  padding: 8px 4px !important;
+  border: 0 !important;
+  border-bottom: 1px solid #e1e1e1 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: #222 !important;
+}
+.contract-choice-list label:hover,
+.contract-meter-list label:hover {
+  background: #fafafa !important;
+  border-color: #d0d0d0 !important;
+}
+.contract-meter-list input[type='number'] {
+  width: 92px !important;
+  border: 0 !important;
+  border-bottom: 1px solid #555 !important;
+  border-radius: 0 !important;
+}
+.finance-object-card {
+  gap: 0 !important;
+  margin-top: 8px !important;
+  border-top: 1px solid #e1e1e1 !important;
+}
+.finance-object-card span {
+  padding: 9px 4px !important;
+}
+.finance-object-card small,
+.finance-object-card b {
+  color: #222 !important;
+  font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif !important;
+}
+.contract-sidecard,
+.finance-sidecard {
+  padding: 15px !important;
+  border: 1px solid #d6d6d6 !important;
+  border-radius: 4px !important;
+  background: #fff !important;
+  box-shadow: none !important;
+  font-family: "Noto Sans SC", "Microsoft YaHei", sans-serif !important;
+}
+.contract-sidecard::before,
+.finance-sidecard::before {
+  display: none !important;
+}
+.contract-sidecard > b,
+.finance-sidecard > b {
+  display: block !important;
+  min-height: 0 !important;
+  padding: 0 0 8px !important;
+  border-bottom: 1px solid #ddd !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #333 !important;
+  font-size: 13px !important;
+  letter-spacing: 0 !important;
+}
+.contract-sidecard > strong,
+.finance-sidecard > strong {
+  margin: 10px 0 !important;
+  color: #222 !important;
+  font-size: 22px !important;
+}
+.finance-sidecard > strong { font-size: 16px !important; }
+.contract-progress {
+  height: 5px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: #e5e5e5 !important;
+}
+.contract-progress i {
+  background: #333 !important;
+}
+.contract-sidecard p,
+.finance-sidecard p,
+.contract-sidecard dt,
+.contract-sidecard dd,
+.finance-sidecard dt,
+.finance-sidecard dd,
+.contract-sidecard li {
+  color: #444 !important;
+}
+.contract-sidecard li i {
+  background: transparent !important;
+  color: #333 !important;
+}
+.contract-sidecard dl div,
+.finance-sidecard dl div {
+  border-top: 1px solid #eee !important;
+}
+.contract-signatures {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 42px;
+  margin-top: 34px;
+  padding-top: 18px;
+  border-top: 1px solid #999;
+}
+.contract-signatures div {
+  min-height: 78px;
+}
+.contract-signatures b,
+.contract-signatures small {
+  display: block;
+  color: #222;
+  font-family: "Noto Serif SC", "Songti SC", SimSun, serif;
+}
+.contract-signatures span {
+  display: block;
+  height: 28px;
+  margin: 18px 0 6px;
+  border-bottom: 1px solid #555;
+}
+.contract-signatures small {
+  color: #555;
+  font-size: 12px;
+}
+@media (max-width: 920px) {
+  .contract-paper,
+  .finance-paper {
+    padding: 28px 24px !important;
+  }
+  .contract-signatures {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-loading-spinner { animation: none; }
+  .data-content-enter-active { transition: none; }
+}
+/* Unified business error feedback: enters from above, stays briefly, then fades. */
+.error:not(.error-toast),
+.form-error,
+.center-error,
+.error-banner,
+.device-wizard-error,
+.finance-inline-error,
+.wizard-error,
+.screen-error,
+.efficiency-error {
+  position: fixed !important;
+  z-index: 4000 !important;
+  top: 18px !important;
+  left: 50% !important;
+  transform: translate(-50%, -18px) !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 9px !important;
+  width: fit-content !important;
+  max-width: min(560px, calc(100vw - 32px)) !important;
+  min-height: 42px !important;
+  margin: 0 !important;
+  padding: 11px 18px !important;
+  border: 1px solid #efc9bd !important;
+  border-radius: 10px !important;
+  background: #fff8f5 !important;
+  color: #a34730 !important;
+  box-shadow: 0 12px 30px rgba(53, 37, 30, .16) !important;
+  line-height: 1.5 !important;
+  pointer-events: none !important;
+  overflow-wrap: anywhere !important;
+  animation: global-error-toast 3.5s ease forwards !important;
+}
+
+@keyframes global-error-toast {
+  0% { opacity: 0; transform: translate(-50%, -18px) !important; }
+  12% { opacity: 1; transform: translate(-50%, 0) !important; }
+  78% { opacity: 1; transform: translate(-50%, 0) !important; }
+  100% { opacity: 0; transform: translate(-50%, -10px) !important; }
+}

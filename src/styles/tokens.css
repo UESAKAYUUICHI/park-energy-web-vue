@@ -1,0 +1,33 @@
+:root {
+  --bg: oklch(98% .005 250);
+  --surface: #fff;
+  --fg: oklch(22% .02 240);
+  --muted: oklch(50% .018 240);
+  --border: oklch(90% .008 240);
+  --accent: oklch(56% .18 250);
+  --blue-deep: oklch(30% .075 250);
+  --blue-soft: #eef4ff;
+  --success: oklch(58% .13 155);
+  --warn: oklch(73% .14 78);
+  --danger: oklch(59% .18 28);
+  --line-soft: #e8eef6;
+
+  --font-sans: "Noto Sans SC", "Microsoft YaHei UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, Consolas, monospace;
+  --font-body: var(--font-sans);
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --shadow-focus: 0 0 0 3px #2879df12;
+
+  /* Vue scaffold aliases kept for legacy components during migration. */
+  --color-background: var(--bg);
+  --color-border: var(--border);
+  --color-heading: var(--fg);
+  --color-text: var(--fg);
+  --section-gap: 160px;
+
+  font-family: var(--font-sans);
+  color: var(--fg);
+  background: var(--bg);
+}
