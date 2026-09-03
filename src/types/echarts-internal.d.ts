@@ -1,0 +1,15 @@
+declare module 'echarts/lib/chart/line/install' { export function install(...args: unknown[]): void }
+declare module 'echarts/lib/chart/bar/install' { export function install(...args: unknown[]): void }
+declare module 'echarts/lib/chart/pie/install' { export function install(...args: unknown[]): void }
+declare module 'echarts/lib/chart/radar/install' { export function install(...args: unknown[]): void }
+declare module 'echarts/lib/chart/gauge/install' { export function install(...args: unknown[]): void }
+declare module 'echarts/lib/chart/heatmap/install' { export function install(...args: unknown[]): void }
+declare module 'echarts/lib/chart/scatter/install' { export function install(...args: unknown[]): void }
+declare module 'echarts/lib/chart/treemap/install' { export function install(...args: unknown[]): void }
+declare module 'echarts/lib/component/dataZoom/install' { export function install(...args: unknown[]): void }
+declare module 'echarts/lib/component/grid/install' { export function install(...args: unknown[]): void }
+declare module 'echarts/lib/component/legend/install' { export function install(...args: unknown[]): void }
+declare module 'echarts/lib/component/tooltip/install' { export function install(...args: unknown[]): void }
+declare module 'echarts/lib/component/visualMap/install' { export function install(...args: unknown[]): void }
+declare module 'echarts/lib/component/marker/installMarkPoint' { export function install(...args: unknown[]): void }
+declare module 'echarts/lib/renderer/installCanvasRenderer' { export function install(...args: unknown[]): void }

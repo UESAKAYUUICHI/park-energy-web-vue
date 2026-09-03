@@ -1,0 +1,12 @@
+/* Reusable form, detail and checklist patterns. */
+.form-tip{margin:0 0 12px;color:#b54708;font-size:12px;line-height:1.6}
+.form-section+.form-section{margin-top:18px;padding-top:16px;border-top:1px solid #e5ebf2}
+.form-section h3{margin:0 0 12px;color:#2c4965;font-size:14px}
+.form-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.form-detail-grid p{margin:0}
+.form-detail-grid .full,.dialog-field.full{grid-column:1/-1}
+.log-line{display:block;padding:5px 0;border-bottom:1px solid var(--border)}
+.check-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:8px 0 18px}
+.check-grid label{padding:8px;border:1px solid var(--border);border-radius:6px}
+
+@media(max-width:720px){.form-detail-grid,.check-grid{grid-template-columns:1fr}}

@@ -1,0 +1,42 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--bg);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .5; }
+
+pre {
+  max-height: 360px;
+  padding: 12px;
+  overflow: auto;
+  background: var(--bg);
+  font: 12px/1.55 var(--font-mono);
+  white-space: pre-wrap;
+}
+
+a { color: inherit; text-decoration: none; }
+svg.lucide { display: block; flex: none; }
+button svg.lucide { pointer-events: none; }
