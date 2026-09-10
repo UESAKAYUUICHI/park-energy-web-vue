@@ -50,7 +50,7 @@ const versionDeleteTarget = ref<RecordRow | null>(null)
 const createParentLocked = ref(false)
 const modelImagePreview = ref('')
 const modelImageSaving = ref(false)
-const versionForm = reactive({ collectIntervalSeconds: 300, qualityThresholdPct: 95, protocolType: 'JSON', remark: '' })
+const versionForm = reactive({ collectIntervalSeconds: 300, qualityThresholdPct: 80, protocolType: 'JSON', remark: '' })
 const attributeDrafts = ref<RecordRow[]>([])
 const pointDrafts = ref<RecordRow[]>([])
 const templateAttributeKeyword = ref('')
@@ -352,7 +352,7 @@ async function refreshModelImage() {
 function syncDrafts() {
   Object.assign(versionForm, {
     collectIntervalSeconds: Number(camel(version.value, 'collectIntervalSeconds', 'collect_interval_seconds') || 300),
-    qualityThresholdPct: Number(camel(version.value, 'qualityThresholdPct', 'quality_threshold_pct') || 95),
+    qualityThresholdPct: Number(camel(version.value, 'qualityThresholdPct', 'quality_threshold_pct') || 80),
     protocolType: String(camel(version.value, 'protocolType', 'protocol_type') || 'JSON') === 'MODBUS' ? 'MODBUS_RTU' : String(camel(version.value, 'protocolType', 'protocol_type') || 'JSON'),
     remark: String(version.value.remark || ''),
   })
