@@ -9,6 +9,7 @@ const componentFor = (kind: string) => {
   if (kind === 'resource') return () => import('@/views/ResourceView.vue')
   if (['monitor', 'analysis', 'quality'].includes(kind)) return () => import('@/views/EnergyView.vue')
   if (kind === 'power-efficiency') return () => import('@/views/PowerEfficiencyView.vue')
+  if (kind === 'edge-config') return () => import('@/views/EdgeConfigView.vue')
   if (['alarms', 'alarm-workbench', 'alarm-rules'].includes(kind)) return () => import('@/views/AlarmView.vue')
   if (kind === 'tariff') return () => import('@/views/TariffPlanView.vue')
   if (kind === 'data-quality') return () => import('@/views/DataQualityView.vue')
@@ -65,7 +66,7 @@ export const routeRecords: RouteRecordRaw[] = [
   { path: '/billing/rule-scopes', redirect: workbenchRedirect('/billing/schemes', 'rule-scopes') },
   { path: '/billing/price-items', redirect: workbenchRedirect('/billing/schemes', 'price-items') },
   { path: '/billing/periods', redirect: workbenchRedirect('/billing/closing', 'periods') },
-  page('/access/diagnostic', 'access-diagnostic', '接入诊断', 'access:view', 'access'), page('/access/control', 'access-control', '设备控制台', 'access:command', 'control'), page('/access/commands', 'access-commands', '指令追踪', 'access:view', 'commands'),
+  page('/access/diagnostic', 'access-diagnostic', '接入诊断', 'access:view', 'access'), page('/access/edge-config', 'edge-config', '采集配置', 'archive:list', 'edge-config'), page('/access/control', 'access-control', '设备控制台', 'access:command', 'control'), page('/access/commands', 'access-commands', '指令追踪', 'access:view', 'commands'),
   page('/operations/work-orders', 'operations-work-orders', '运维工作台', 'ops:workorder:list', 'operations', 'work-orders'),
   { path: '/operations/inspections', redirect: { path: '/operations/work-orders', query: { view: 'inspections' } } },
   page('/system/users', 'system-users', '用户管理', 'system:user:list', 'users'), page('/system/tenants', 'system-tenants', '租户管理', 'system:user:list', 'tenant-management'), page('/system/roles', 'system-roles', '角色管理', 'system:role:list', 'roles'), page('/system/permissions', 'system-permissions', '权限字典', 'system:permission:list', 'permissions'), page('/system/rbac-workbench', 'system-rbac-workbench', '模块权限分配', 'system:role:list', 'rbac-workbench'), page('/system/user-org-bindings', 'system-user-org-bindings', '用户组织绑定', 'system:user:scope:list', 'user-org-binding'), page('/system/audit', 'system-audit', '操作审计', 'system:operation:list', 'audit'), page('/account/profile', 'personal-center', '个人中心', undefined, 'personal-center'), { path: '/profile', redirect: '/account/profile' },

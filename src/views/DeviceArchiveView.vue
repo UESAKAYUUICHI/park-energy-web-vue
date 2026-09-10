@@ -193,7 +193,7 @@ const form = reactive<ArchiveForm>({
   device_model: '',
   install_time: '',
   collect_interval_seconds: 300,
-  quality_threshold_pct: 95,
+  quality_threshold_pct: 80,
   settlement_enabled: 0,
   meter_role: 'INTERNAL',
   meter_factor: 1,
@@ -483,7 +483,7 @@ const billingStatCards = computed(() => [
   ['可计费测点', `${pointDefinitions.value.filter((item) => Number(item.billable) === 1).length} 个`],
   ['本期计量点数', `${periodHistoryRows.value.length} 条`],
   ['本期累计用量', `${periodHistoryRows.value.reduce((sum, row) => sum + Number(row.usage_value ?? row.value ?? row.avg_value ?? 0), 0).toFixed(2)}`],
-  ['数据完整率', `${Number(detailDevice.value.quality_threshold_pct || 95).toFixed(0)}% 门槛`],
+  ['数据完整率', `${Number(detailDevice.value.quality_threshold_pct || 80).toFixed(0)}% 门槛`],
 ])
 const pointMappings = computed(() => ((profile.value.points as RecordRow | undefined)?.mappings || []) as RecordRow[])
 const realtimeLookup = computed<Record<string, unknown>>(() => {
@@ -1214,7 +1214,7 @@ function openDevice(gateway?: RecordRow, row?: RecordRow) {
     device_model: row?.device_model || '',
     install_time: row?.install_time || '',
     collect_interval_seconds: Number(row?.collect_interval_seconds || 300),
-    quality_threshold_pct: Number(row?.quality_threshold_pct || 95),
+    quality_threshold_pct: Number(row?.quality_threshold_pct || 80),
     settlement_enabled: Number(row?.settlement_enabled ?? 0),
     meter_role: String(row?.meter_role || 'INTERNAL'),
     meter_factor: Number(row?.meter_factor || 1),
@@ -1276,7 +1276,7 @@ function applyModelDefaults() {
   form.device_type_id = option.device_type_id == null ? '' : String(option.device_type_id)
   form.device_model = String(option.model_code || '')
   form.collect_interval_seconds = Number(option.collect_interval_seconds || 300)
-  form.quality_threshold_pct = Number(option.quality_threshold_pct || 95)
+  form.quality_threshold_pct = Number(option.quality_threshold_pct || 80)
   if (!form.device_name) form.device_name = String(option.model_name || '')
 }
 
@@ -2504,7 +2504,7 @@ onBeforeUnmount(() => {
             <dt>安装位置</dt><dd>{{ detailDevice.install_location || '—' }}</dd>
             <dt>设备型号</dt><dd>{{ detailDevice.device_model || '—' }}</dd>
             <dt>采集周期</dt><dd>{{ detailDevice.collect_interval_seconds || 300 }} 秒</dd>
-            <dt>结算完整率阈值</dt><dd>{{ detailDevice.quality_threshold_pct || 95 }}%</dd>
+            <dt>结算完整率阈值</dt><dd>{{ detailDevice.quality_threshold_pct || 80 }}%</dd>
           </dl>
         </aside>
         <section class="device-detail-right">
@@ -2585,7 +2585,7 @@ onBeforeUnmount(() => {
               <div class="billing-dashboard-grid billing-dashboard-grid--compact">
                 <section class="device-context-card billing-dashboard-chart"><div class="archive-section-title"><i></i><h3>计量趋势</h3><small>{{ historyPeriod.label }}</small></div><div ref="billingUsageChartEl" class="billing-stat-chart"></div></section>
                 <section class="device-context-card billing-dashboard-chart"><div class="archive-section-title"><i></i><h3>采集完整率</h3><small>小时统计</small></div><div ref="billingQualityChartEl" class="billing-stat-chart"></div></section>
-                <section class="device-context-card billing-dashboard-prepared"><div class="archive-section-title"><i></i><h3>计量结算准备度</h3><small>以采集质量为准</small></div><dl class="device-context-facts"><dt>可计费测点</dt><dd>{{ pointDefinitions.filter(item => Number(item.billable) === 1).length }} 个</dd><dt>结算完整率阈值</dt><dd>{{ detailDevice.quality_threshold_pct || 95 }}%</dd><dt>最近统计记录</dt><dd>{{ recentHistory.length }} 条</dd></dl></section>
+                <section class="device-context-card billing-dashboard-prepared"><div class="archive-section-title"><i></i><h3>计量结算准备度</h3><small>以采集质量为准</small></div><dl class="device-context-facts"><dt>可计费测点</dt><dd>{{ pointDefinitions.filter(item => Number(item.billable) === 1).length }} 个</dd><dt>结算完整率阈值</dt><dd>{{ detailDevice.quality_threshold_pct || 80 }}%</dd><dt>最近统计记录</dt><dd>{{ recentHistory.length }} 条</dd></dl></section>
                 <section class="device-context-card billing-dashboard-entry"><div class="archive-section-title"><i></i><h3>设备计费状态</h3><small>{{ Number(detailDevice.settlement_enabled || 0) === 1 ? '已纳入合同结算范围' : '当前不会参与账单计算' }}</small></div><div class="settlement-switch-card" :class="{ enabled: Number(detailDevice.settlement_enabled || 0) === 1 }"><div><b>{{ Number(detailDevice.settlement_enabled || 0) === 1 ? '允许计费' : '禁止计费' }}</b><span>{{ Number(detailDevice.settlement_enabled || 0) === 1 ? '计费引擎可读取该设备的累计量统计。' : '设备仍可采集数据，但计费引擎会过滤该设备。' }}</span></div><button :class="Number(detailDevice.settlement_enabled || 0) === 1 ? 'quiet' : 'primary'" :disabled="settlementSwitching" @click="toggleDeviceSettlement">{{ settlementSwitching ? '处理中…' : Number(detailDevice.settlement_enabled || 0) === 1 ? '关闭计费' : '允许计费' }}</button></div></section>
               </div>
             </template>
