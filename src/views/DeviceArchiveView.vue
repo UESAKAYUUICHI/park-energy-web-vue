@@ -10,7 +10,7 @@ import AppDialog from '@/components/app/AppDialog.vue'
 import AppImage from '@/components/app/AppImage.vue'
 import CatalogTreeNode from '@/components/catalog/CatalogTreeNode.vue'
 import StatusTag from '@/components/app/StatusTag.vue'
-import { bindDevicesToGateway, bindDiscoveredDevice, catalogModel, catalogTree, copyResource, createResource, deleteMetricTemplate, deviceArchiveProfile, deviceCards, deviceProfile, deviceTree, gatewayArchiveProfile, listResource, metricTemplates as loadMetricTemplatesApi, orgArchiveProfile, parseDevicePayloadPreview, provisionDevice, publishedModelOptions, removeResource, replayAccessRawMessage, resourceOptions, rootOrgs, saveDeviceAttributeOverrides, saveDeviceTypePoints, saveMetricTemplate as saveMetricTemplateApi, statistics, updateDeviceContext, updateResource } from '@/api/platform'
+import { bindDevicesToGateway, bindDiscoveredDevice, catalogModel, catalogTree, copyResource, createResource, deleteMetricTemplate, deviceArchiveProfile, deviceCards, deviceHistoryPage, deviceProfile, deviceTree, gatewayArchiveProfile, listResource, metricTemplates as loadMetricTemplatesApi, orgArchiveProfile, parseDevicePayloadPreview, provisionDevice, publishedModelOptions, removeResource, replayAccessRawMessage, resourceOptions, rootOrgs, saveDeviceAttributeOverrides, saveMetricTemplate as saveMetricTemplateApi, statistics, updateDeviceContext, updateResource } from '@/api/platform'
 import { useSessionStore } from '@/stores/session'
 import type { RecordRow } from '@/types/domain'
 import { loadBasicChartRuntime, type BasicChartRuntime } from '@/utils/chartRuntime'
@@ -19,7 +19,6 @@ import { fieldLabel } from '@/utils/fieldLabels'
 
 type FormType = 'org' | 'gateway' | 'device'
 type NodeType = 'ORG' | 'GATEWAY' | 'DEVICE' | 'SPACE' | 'GROUP'
-
 interface TreeNode extends RecordRow {
   nodeType: NodeType
   children?: TreeNode[]
@@ -153,9 +152,6 @@ const bindingKeyword = ref('')
 const bindingLoading = ref(false)
 const bindingTarget = ref<TreeNode | null>(null)
 const pointDrafts = ref<PointDraft[]>([])
-const pointSaving = ref(false)
-const pointEditor = ref<PointDraft | null>(null)
-const pointEditingKey = ref('')
 const parsePreviewDialog = ref(false)
 const parsePreviewBusy = ref(false)
 const parsePreviewPayload = ref('')
@@ -213,6 +209,10 @@ const historyAnchor = ref(formatDateInput(new Date()))
 const periodHistoryRows = ref<RecordRow[]>([])
 const hourlyMetricRows = ref<RecordRow[]>([])
 const realtimeMetricRows = ref<RecordRow[]>([])
+const rawHistoryRows = ref<RecordRow[]>([])
+const rawHistoryTotal = ref(0)
+const rawHistoryPage = ref(1)
+const rawHistoryPageSize = 20
 const metricTemplates = ref<RecordRow[]>([])
 const metricTemplateId = ref('')
 const metricTemplateName = ref('')
@@ -272,7 +272,7 @@ const selectedIsGateway = computed(() => selectedNode.value?.nodeType === 'GATEW
 const selectedIsOrg = computed(() => selectedNode.value?.nodeType === 'ORG')
 const selectedIsSpace = computed(() => selectedNode.value?.nodeType === 'SPACE')
 const selectedIsGroup = computed(() => selectedNode.value?.nodeType === 'GROUP')
-const selectedCanMutate = computed(() => ['ORG', 'GATEWAY', 'DEVICE'].includes(String(selectedNode.value?.nodeType)))
+const selectedCanMutate = computed(() => ['ORG', 'GATEWAY'].includes(String(selectedNode.value?.nodeType)))
 const deviceGatewayFilterOptions = computed(() => {
   if (!deviceRootOrgIds.value.length) return [] as RecordRow[]
   const ids = new Set<string>(deviceRootOrgIds.value)
@@ -395,6 +395,17 @@ const historyRowsFallback = computed(() => {
   return rows.length ? rows : energyTrend.value
 })
 const historyDisplayRows = computed(() => {
+  if (selectedIsDevice.value) {
+    return rawHistoryRows.value.map((row) => ({
+      time: String(row.time || row.collect_time || row.collectTime || ''),
+      values: Object.entries(row)
+        .filter(([key, value]) => key !== 'time' && !isMissingValue(value))
+        .reduce<Record<string, unknown>>((acc, [key, value]) => {
+          acc[pointDisplayName(key)] = value
+          return acc
+        }, {}),
+    })).filter((item) => item.time && Object.keys(item.values).length)
+  }
   if (periodHistoryChartRows.value.length) return periodHistoryChartRows.value
   return historyRowsFallback.value.map((item) => ({
     time: String(item.stat_period || item.stat_date || item.stat_month || item.stat_time || ''),
@@ -405,6 +416,7 @@ const historyDisplayRows = computed(() => {
 })
 const historyDisplayKeys = computed(() => [...new Set(historyDisplayRows.value.flatMap((row) => Object.keys(row.values)))])
 const historyHasData = computed(() => historyDisplayRows.value.length > 0)
+const rawHistoryPageCount = computed(() => Math.max(1, Math.ceil(rawHistoryTotal.value / rawHistoryPageSize)))
 const archiveHistoryChartRows = computed(() => historyDisplayRows.value)
 const alarmVisibleColumns = computed(() => alarmTableColumns.value.filter((column) => alarmColumnFilters.value.includes(column)))
 const filteredRecentAlarms = computed(() => {
@@ -469,7 +481,7 @@ const periodHistoryChartRows = computed(() => {
   const rows = periodHistoryRows.value
   const grouped = new Map<string, { time: string; values: Record<string, unknown> }>()
   rows.forEach((row) => {
-    const point = String(row.point_code || row.pointCode || '总用量')
+    const point = pointDisplayName(row.point_code || row.pointCode || '总用量')
     const time = historyGranularity.value === 'day'
       ? String(row.stat_period || `${row.stat_date || ''} ${String(row.stat_hour ?? '').padStart(2, '0')}:00`).trim()
       : String(row.stat_period || row.stat_date || row.stat_month || row.stat_year || '')
@@ -485,7 +497,6 @@ const billingStatCards = computed(() => [
   ['本期累计用量', `${periodHistoryRows.value.reduce((sum, row) => sum + Number(row.usage_value ?? row.value ?? row.avg_value ?? 0), 0).toFixed(2)}`],
   ['数据完整率', `${Number(detailDevice.value.quality_threshold_pct || 80).toFixed(0)}% 门槛`],
 ])
-const pointMappings = computed(() => ((profile.value.points as RecordRow | undefined)?.mappings || []) as RecordRow[])
 const realtimeLookup = computed<Record<string, unknown>>(() => {
   const raw = profile.value.realtime
   if (raw && typeof raw === 'object' && Array.isArray((raw as RecordRow).points)) {
@@ -519,7 +530,7 @@ const selectedEntity = computed(() => {
 })
 const selectedBasicInfo = computed(() => {
   const source = selectedEntity.value
-  return [
+  const rows = [
     ['名称', source.device_name || source.gateway_name || source.org_name || source.space_name || source.group_name || '—'],
     ['编号', source.device_sn || source.gateway_sn || source.space_code || source.id || '—'],
     ['类型', source.type_name || source.type_code || source.space_type || orgTypeText(source.org_type) || source.nodeType || '—'],
@@ -527,12 +538,20 @@ const selectedBasicInfo = computed(() => {
     ['网关', source.gateway_name || source.gateway_sn || '—'],
     ['安装位置', source.install_location || source.address || '—'],
     ['型号', source.device_model || source.firmware_version || '—'],
-    ['状态', statusText(source.online_status ?? source.status)],
-  ].filter((item) => showAllData.value || !isMissingValue(item[1]))
+  ]
+  if (selectedIsDevice.value) {
+    rows.push(['档案状态', enabledStatusText(source.status)])
+    rows.push(['网关状态', statusText(source.online_status)])
+  } else if (selectedIsGateway.value) {
+    rows.push(['运行状态', statusText(source.online_status)])
+    rows.push(['档案状态', enabledStatusText(source.status)])
+  } else {
+    rows.push(['状态', statusText(source.online_status ?? source.status)])
+  }
+  return rows.filter((item) => showAllData.value || !isMissingValue(item[1]))
 })
 const detailDevice = computed(() => (profile.value.device || {}) as RecordRow)
 const modelAttributes = computed(() => Array.isArray(profile.value.modelAttributes) ? profile.value.modelAttributes as RecordRow[] : [])
-const catalogManagedDevice = computed(() => Boolean(detailDevice.value.model_version_id))
 const billableTotalPointCount = computed(() => pointDefinitions.value.filter((item) => Number(item.billable) === 1
   && Number(item.stat_enabled) === 1 && String(item.business_role || '').toUpperCase() === 'TOTAL_ACCUMULATED').length)
 
@@ -545,14 +564,27 @@ const groupedHistoryColumns = computed(() => {
 })
 const deviceRealtimeChartRows = computed(() => realtimeMetricRows.value.map((item) => ({
   time: String(item.stat_period || `${item.stat_date || ''} ${String(item.stat_hour ?? '').padStart(2, '0')}:00`),
-  values: { [String(item.point_code || item.pointCode || '总用量')]: item.value ?? item.usage_value ?? item.avg_value ?? 0 },
+  values: { [pointDisplayName(item.point_code || item.pointCode || '总用量')]: item.value ?? item.usage_value ?? item.avg_value ?? 0 },
   sourceRows: [item],
 })))
 const deviceRealtimeSeriesKeys = computed(() => [...new Set(deviceRealtimeChartRows.value.flatMap((row) => Object.keys(row.values)))])
+const currentRealtimeChartRows = computed(() => runtimeCards.value
+  .map((item) => ({
+    name: item.name || pointDisplayName(item.code),
+    value: Number(item.value),
+    unit: item.unit,
+  }))
+  .filter((item) => Number.isFinite(item.value))
+  .slice(0, 12))
 const deviceRealtimePointRows = computed(() => Object.entries(realtimeLookup.value)
   .filter(([key]) => key === normalizePointCode(key))
   .map(([key, value]) => ({ key, value: Number(value) }))
   .filter((item) => Number.isFinite(item.value)))
+const pointLabelByCode = computed(() => pointDefinitions.value.reduce<Record<string, string>>((acc, point) => {
+  const code = normalizePointCode(point.point_code || point.pointCode || point.code || '')
+  if (code) acc[code] = String(point.point_name || point.pointName || code)
+  return acc
+}, {}))
 const overviewRealtimeRows = computed(() => realtimeSnapshots.value
   .map((item) => {
     const points = flattenRealtimePoints((item.realtime || {}) as RecordRow)
@@ -610,7 +642,7 @@ const overviewCards = computed(() => {
     ['空间总数', profile.value.spaceCount ?? 0],
     ['在租租户', profile.value.tenantCount ?? 0],
     ['生效合同', profile.value.activeContractCount ?? 0],
-    ['结算设备', profile.value.deviceCount ?? 0],
+    ['设备总数', profile.value.deviceCount ?? 0],
   ]
   return [
     ['设备总数', profile.value.deviceCount ?? '—'],
@@ -627,13 +659,14 @@ const archiveSummaryCards = computed(() => {
   ]
   if (selectedIsDevice.value) return [
     ['测点数量', summary.pointCount ?? pointDefinitions.value.length],
+    ['实时测点', summary.realtimePointCount ?? runtimeCards.value.filter((item) => !isMissingValue(item.value)).length],
     ['计量记录', summary.historyCount ?? recentHistory.value.length],
     ['待处理告警', summary.alarmCount ?? recentAlarms.value.length],
-    ['运维记录', summary.commandCount ?? inspectionRecords.value.length],
+    ['快照时间', summary.realtimeCollectTime ?? '—'],
   ]
   if (selectedIsGateway.value) return [
     ['设备总数', summary.deviceCount ?? profile.value.deviceCount ?? '—'],
-    ['在线设备', summary.onlineDeviceCount ?? profile.value.onlineDeviceCount ?? '—'],
+    ['启用设备', summary.onlineDeviceCount ?? profile.value.onlineDeviceCount ?? '—'],
     ['近期告警', summary.alarmCount ?? recentAlarms.value.length],
     ['实时快照', summary.realtimeSnapshotCount ?? realtimeSnapshots.value.length],
   ]
@@ -649,18 +682,21 @@ const defaultPointCodes = computed(() => {
     .map((point) => String(point.point_code || point.pointCode || point.code || ''))
     .filter(Boolean)
     .slice(0, 3)
-  return codes.length ? codes.join(',') : 'total_active_energy'
+  return codes.join(',')
 })
 const archiveActionLinks = computed<ArchiveAction[]>(() => {
   if (!selectedNode.value) return []
   const id = String(selectedNode.value.id)
-  if (selectedIsDevice.value) return [
+  if (selectedIsDevice.value) {
+    const links = [
     archiveLink('实时监控', '/monitor/realtime', { deviceId: id }),
-    archiveLink('计量分析', '/analysis/history', { deviceId: id, pointCodes: defaultPointCodes.value, startTime: historyStart.value, endTime: historyEnd.value }),
     archiveLink('告警处置', '/alarms/events', { deviceId: id }),
     archiveLink('工单与指令', '/access/commands', { targetId: id }),
     archiveLink('设备控制', '/access/control', { targetId: id }),
-  ]
+    ]
+    if (defaultPointCodes.value) links.splice(1, 0, archiveLink('计量分析', '/analysis/history', { deviceId: id, pointCodes: defaultPointCodes.value, startTime: historyStart.value, endTime: historyEnd.value }))
+    return links
+  }
   if (selectedIsGateway.value) return [
     archiveLink('接入诊断', '/access/diagnostic', { gatewayId: id }),
     archiveLink('指令追踪', '/access/commands', { gatewayId: id }),
@@ -685,7 +721,7 @@ const alarmTableColumns = computed(() => {
 })
 const hasDeviceRealtimeChart = computed(() => {
   if (!selectedIsDevice.value) return overviewRealtimeRows.value.length > 0 || energyTrend.value.length > 0
-  return realtimeMetricRows.value.length > 0
+  return deviceRealtimeChartRows.value.length > 0 || currentRealtimeChartRows.value.length > 0 || energyTrend.value.length > 0
 })
 
 const visibleTreeRows = computed<FlatNode[]>(() => {
@@ -849,14 +885,31 @@ function unwrapRealtimeEnvelope(raw: RecordRow) {
 function isMissingValue(value: unknown) {
   return value === null || value === undefined || value === '' || value === '—' || value === '-' || value === '--'
 }
+function formatMetricNumber(value: unknown, digits = 2) {
+  const number = Number(value)
+  return Number.isFinite(number)
+    ? number.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+    : String(value)
+}
 function displayValue(value: unknown) {
-  return isMissingValue(value) ? '--' : value
+  if (isMissingValue(value)) return '--'
+  if (typeof value === 'number' || (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value)))) {
+    return formatMetricNumber(value)
+  }
+  return value
+}
+function displayMetricValue(value: unknown) {
+  return isMissingValue(value) ? '--' : formatMetricNumber(value)
+}
+function pointDisplayName(code: unknown) {
+  const normalized = normalizePointCode(code)
+  return pointLabelByCode.value[normalized] || String(code || '测点')
 }
 function historyTime(row: RecordRow) {
   return String(row.stat_time || row.collect_time || row.timestamp || row.time || row.stat_date || row.create_time || '—')
 }
 function historyPoint(row: RecordRow) {
-  return String(row.point_code || row.pointCode || row.metric_code || row.metricCode || row.name || '测点')
+  return pointDisplayName(row.point_code || row.pointCode || row.metric_code || row.metricCode || row.name || '测点')
 }
 function historyMetricValue(row: RecordRow) {
   return row.value ?? row.data_value ?? row.current_value ?? row.usage_value ?? row.avg_value ?? row.end_value ?? row.alarm_value ?? '--'
@@ -882,6 +935,12 @@ function statusMeta(value: unknown) {
 }
 function statusText(value: unknown) {
   return statusMeta(value).text
+}
+function enabledStatusText(value: unknown) {
+  const normalized = Number(value)
+  if (normalized === 1) return '启用'
+  if (normalized === 0) return '停用'
+  return isMissingValue(value) ? '—' : String(value)
 }
 function orgTypeText(value: unknown) {
   const map: Record<string, string> = { 1: '园区', 2: '企业', 3: '楼宇', 4: '楼层', 5: '区域' }
@@ -915,6 +974,7 @@ function archiveFieldValue(key: string, value: unknown) {
   if (key === 'online_status' || key === 'status') return statusText(value)
   if (key === 'org_type') return orgTypeText(value)
   if (['enabled', 'deleted', 'billable', 'stat_enabled', 'required'].includes(key)) return yesNoText(value)
+  if (typeof value === 'number' || (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value)))) return formatMetricNumber(value)
   if (typeof value === 'object') return JSON.stringify(value)
   return String(value)
 }
@@ -934,49 +994,8 @@ function toPointDraft(row: RecordRow = {}, index = 0): PointDraft {
   }
 }
 
-function emptyPointDraft(index = pointDrafts.value.length): PointDraft {
-  return toPointDraft({ sort: index, data_type: 'DOUBLE', business_role: 'INSTANT_VALUE', billable: 0, stat_enabled: 1, enabled: 1 }, index)
-}
-
 function syncPointDrafts() {
   pointDrafts.value = pointDefinitions.value.map((row, index) => toPointDraft(row, index))
-  pointEditor.value = emptyPointDraft(pointDrafts.value.length)
-  pointEditingKey.value = ''
-}
-
-function addPointDraft() {
-  pointEditor.value = emptyPointDraft(pointDrafts.value.length)
-  pointEditingKey.value = ''
-}
-
-function editPointDraft(point: PointDraft) {
-  pointEditor.value = { ...point }
-  pointEditingKey.value = point._draftKey
-}
-
-async function confirmPointDraft() {
-  if (!pointEditor.value) pointEditor.value = emptyPointDraft(pointDrafts.value.length)
-  const previousDrafts = pointDrafts.value.map((point) => ({ ...point }))
-  const previousEditor = { ...pointEditor.value }
-  const previousEditingKey = pointEditingKey.value
-  const draft = { ...pointEditor.value }
-  if (!draft.point_code.trim() || !draft.point_name.trim()) {
-    error.value = '测点编码和测点名称不能为空'
-    return
-  }
-  if (pointEditingKey.value) {
-    pointDrafts.value = pointDrafts.value.map((point) => point._draftKey === pointEditingKey.value ? { ...draft, _draftKey: point._draftKey } : point)
-  } else {
-    pointDrafts.value = [...pointDrafts.value, { ...draft, sort: pointDrafts.value.length }]
-  }
-  pointEditor.value = emptyPointDraft(pointDrafts.value.length)
-  pointEditingKey.value = ''
-  const saved = await persistPointDrafts()
-  if (!saved) {
-    pointDrafts.value = previousDrafts
-    pointEditor.value = previousEditor
-    pointEditingKey.value = previousEditingKey
-  }
 }
 
 function syncAttributeDrafts() {
@@ -1006,67 +1025,6 @@ async function saveAttributeOverrides() {
   } finally {
     attributeSaving.value = false
   }
-}
-
-async function togglePointEnabled(point: PointDraft) {
-  const previousDrafts = pointDrafts.value.map((item) => ({ ...item }))
-  const previousEditor = pointEditor.value ? { ...pointEditor.value } : null
-  point.enabled = Number(point.enabled) === 1 ? 0 : 1
-  if (pointEditingKey.value === point._draftKey && pointEditor.value) {
-    pointEditor.value.enabled = point.enabled
-  }
-  const saved = await persistPointDrafts()
-  if (!saved) {
-    pointDrafts.value = previousDrafts
-    pointEditor.value = previousEditor
-  }
-}
-
-async function removePointDraft(index: number) {
-  const previousDrafts = pointDrafts.value.map((point) => ({ ...point }))
-  const previousEditor = pointEditor.value ? { ...pointEditor.value } : null
-  const previousEditingKey = pointEditingKey.value
-  const removed = pointDrafts.value[index]
-  pointDrafts.value = pointDrafts.value.filter((_, itemIndex) => itemIndex !== index)
-  if (removed && pointEditingKey.value === removed._draftKey) addPointDraft()
-  const saved = await persistPointDrafts()
-  if (!saved) {
-    pointDrafts.value = previousDrafts
-    pointEditor.value = previousEditor
-    pointEditingKey.value = previousEditingKey
-  }
-}
-
-async function persistPointDrafts() {
-  const typeId = detailDevice.value.device_type_id
-  if (!typeId) {
-    error.value = '请先为设备选择设备类型/型号'
-    return false
-  }
-  const invalid = pointDrafts.value.find((point) => !point.point_code.trim() || !point.point_name.trim())
-  if (invalid) {
-    error.value = '测点编码和测点名称不能为空'
-    return false
-  }
-  pointSaving.value = true
-  try {
-    const result = await saveDeviceTypePoints(typeId, {
-      definitions: pointDrafts.value.map(({ _draftKey, ...point }, index) => ({ ...point, sort: index })),
-      mappings: pointMappings.value,
-    })
-    profile.value = { ...profile.value, points: result }
-    syncPointDrafts()
-    return true
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '测点保存失败'
-    return false
-  } finally {
-    pointSaving.value = false
-  }
-}
-
-async function savePointDrafts() {
-  await persistPointDrafts()
 }
 
 function openParsePreview() {
@@ -1106,6 +1064,9 @@ async function selectNode(node: TreeNode) {
   hourlyMetricRows.value = []
   realtimeMetricRows.value = []
   periodHistoryRows.value = []
+  rawHistoryRows.value = []
+  rawHistoryTotal.value = 0
+  rawHistoryPage.value = 1
   metricRequestToken.value += 1
   disposeArchiveCharts()
   profileLoading.value = true
@@ -1126,8 +1087,6 @@ async function selectNode(node: TreeNode) {
       if (selectionToken !== selectionRequestToken.value) return
       profile.value = nextProfile
       pointDrafts.value = []
-      pointEditor.value = null
-      pointEditingKey.value = ''
       activeArchiveTab.value = 'device'
       dataView.value = 'chart'
     } else if (node.nodeType === 'ORG') {
@@ -1135,8 +1094,6 @@ async function selectNode(node: TreeNode) {
       if (selectionToken !== selectionRequestToken.value) return
       profile.value = nextProfile
       pointDrafts.value = []
-      pointEditor.value = null
-      pointEditingKey.value = ''
       activeArchiveTab.value = 'device'
       dataView.value = 'chart'
       await loadMetricView(selectionToken)
@@ -1241,7 +1198,7 @@ function openDiscoveredDeviceFromRoute() {
 function selectDialogOrg(node: RecordRow) {
   if (node.nodeType === 'GATEWAY' && formType.value === 'device') {
     form.org_id = String(node.org_id)
-    form.gateway_id = String(node.id)
+    form.gateway_id = ''
     form.protocol_addr = ''
     selectedOrgTreeKey.value = String(node.key)
     return
@@ -1340,11 +1297,6 @@ async function submitDeviceWizard() {
       throw new Error('设备登记步骤状态无效，请关闭弹窗后重新打开。')
     }
     if (!validateDeviceWizardStep(step)) return
-    if (step === 3 && form.gateway_id && selectedModelIsModbus.value && !String(form.protocol_addr || '').trim()) {
-      protocolAddressDraft.value = ''
-      protocolAddressDialog.value = true
-      return
-    }
     if (step < 3) {
       deviceWizardStep.value = step + 1
       await nextTick()
@@ -1408,10 +1360,9 @@ function openGatewayForSelectedOrg() {
   openGateway(selectedNode.value.id)
 }
 function editSelected() {
-  if (!selectedNode.value) return
+  if (!selectedNode.value || !selectedCanMutate.value) return
   if (selectedNode.value.nodeType === 'ORG') openOrg(undefined, selectedNode.value)
   else if (selectedNode.value.nodeType === 'GATEWAY') openGateway(undefined, selectedNode.value)
-  else if (selectedNode.value.nodeType === 'DEVICE') openDevice(undefined, Object.keys(detailDevice.value).length ? detailDevice.value : selectedNode.value)
 }
 async function duplicateSelection() {
   if (!selectedNode.value) return
@@ -1425,7 +1376,7 @@ async function duplicateSelection() {
   }
 }
 function deleteSelected() {
-  if (!selectedNode.value) return
+  if (!selectedNode.value || !selectedCanMutate.value) return
   deletingNodeRef.value = selectedNode.value
   deleteDialog.value = true
 }
@@ -1729,6 +1680,7 @@ function setHistoryGranularity(value: HistoryGranularity) {
     return
   }
   historyGranularity.value = value
+  rawHistoryPage.value = 1
   hourlyMetricRows.value = []
   periodHistoryRows.value = []
   void loadMetricView()
@@ -1741,6 +1693,11 @@ function shiftHistoryPeriod(delta: number) {
   else if (historyGranularity.value === 'month') anchor.setMonth(anchor.getMonth() + delta)
   else anchor.setFullYear(anchor.getFullYear() + delta)
   historyAnchor.value = formatDateInput(anchor)
+  rawHistoryPage.value = 1
+  void loadMetricView()
+}
+function changeRawHistoryPage(page: number) {
+  rawHistoryPage.value = Math.max(1, Math.min(rawHistoryPageCount.value, page))
   void loadMetricView()
 }
 function aggregateHistoryRows(rows: RecordRow[], granularity: HistoryGranularity = historyGranularity.value) {
@@ -1780,11 +1737,13 @@ async function loadMetricView(selectionToken?: number) {
     (!nodeKeyAtRequest || nodeKeyAtRequest === (selectedNode.value ? nodeKey(selectedNode.value) : ''))
   const deviceId = detailDevice.value.id || selectedNode.value?.id || route.params.id
   const orgId = selectedIsOrg.value ? selectedNode.value?.id : undefined
-  if ((!deviceId && !orgId) || (!selectedMetricPointCodes.value.length && !orgId)) {
+  if ((!deviceId && !orgId) || (!orgId && activeArchiveTab.value === 'history' && !deviceId)) {
     if (isCurrentSelection()) {
       hourlyMetricRows.value = []
       realtimeMetricRows.value = []
       periodHistoryRows.value = []
+      rawHistoryRows.value = []
+      rawHistoryTotal.value = 0
     }
     return
   }
@@ -1801,14 +1760,28 @@ async function loadMetricView(selectionToken?: number) {
     const queryRows = async (path: string, startDate: string, endDate: string) => [await statistics(path, orgId
       ? { orgId, startDate, endDate }
       : { deviceId, pointCodes: selectedMetricPointCodes.value.join(','), startDate, endDate })]
+    const isDeviceHistory = !orgId && activeArchiveTab.value === 'history'
     const realtimeStart = daysAgo(1)
+    const historyPageResponse = isDeviceHistory
+      ? await deviceHistoryPage({
+          deviceId,
+          startTime: `${start}T00:00:00Z`,
+          endTime: `${end}T23:59:59Z`,
+          pageNum: rawHistoryPage.value,
+          pageSize: rawHistoryPageSize,
+        })
+      : null
     const [responses, realtimeResponses] = await Promise.all([
-      queryRows(historyPath, start, end),
-      orgId ? Promise.resolve([]) : queryRows('hourly', realtimeStart, formatDateInput(new Date())).catch(() => []),
+      isDeviceHistory ? Promise.resolve([]) : queryRows(historyPath, start, end),
+      isDeviceHistory || orgId ? Promise.resolve([]) : queryRows('hourly', realtimeStart, formatDateInput(new Date())).catch(() => []),
     ])
     if (!isCurrentSelection()) return
     const rows = responses.flatMap(normalizeStatisticsRows)
     const realtimeRows = realtimeResponses.flatMap(normalizeStatisticsRows)
+    if (historyPageResponse) {
+      rawHistoryRows.value = Array.isArray(historyPageResponse.records) ? historyPageResponse.records as RecordRow[] : []
+      rawHistoryTotal.value = Number(historyPageResponse.total || 0)
+    }
     hourlyMetricRows.value = rows
       .map((row): RecordRow => ({ ...row, value: row.usage_value ?? row.avg_value ?? row.value }))
       .sort((a: RecordRow, b: RecordRow) => String(a.stat_period || a.stat_date).localeCompare(String(b.stat_period || b.stat_date)))
@@ -1952,7 +1925,7 @@ function lineOption(labels: string[], values: number[], name: string): EChartsCo
   return {
     color: [accent],
     grid: { left: 10, right: 12, top: 18, bottom: 28, containLabel: true },
-    tooltip: { trigger: 'axis', valueFormatter: (value: unknown) => `${Number(value || 0).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}` },
+    tooltip: { trigger: 'axis', valueFormatter: (value: unknown) => formatMetricNumber(value) },
     xAxis: { type: 'category', boundaryGap: false, data: labels, axisTick: { show: false }, axisLine: { lineStyle: { color: border } }, axisLabel: { color: muted, fontSize: 10 } },
     yAxis: { type: 'value', min: 0, splitLine: { lineStyle: { color: border, type: 'dashed' } }, axisLabel: { color: muted, fontSize: 10 } },
     series: [{ name, type: 'line', smooth: true, symbolSize: 7, data: values, areaStyle: { color: new graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(47, 134, 255, .22)' }, { offset: 1, color: 'rgba(47, 134, 255, 0)' }]) }, lineStyle: { width: 3 } }],
@@ -1965,10 +1938,33 @@ function barOption(labels: string[], values: number[], name: string): EChartsCor
   return {
     color: [accent],
     grid: { left: 10, right: 12, top: 18, bottom: 28, containLabel: true },
-    tooltip: { trigger: 'axis' },
+    tooltip: { trigger: 'axis', valueFormatter: (value: unknown) => formatMetricNumber(value) },
     xAxis: { type: 'category', data: labels, axisTick: { show: false }, axisLine: { lineStyle: { color: border } }, axisLabel: { color: muted, fontSize: 10 } },
     yAxis: { type: 'value', splitLine: { lineStyle: { color: border, type: 'dashed' } }, axisLabel: { color: muted, fontSize: 10 } },
     series: [{ name, type: 'bar', barWidth: 18, data: values }],
+  }
+}
+function realtimeBarOption(rows: Array<{ name: string; value: number; unit?: unknown }>, name: string): EChartsCoreOption {
+  const accent = cssVar('--accent', '#2f86ff')
+  const muted = cssVar('--muted', '#758195')
+  const border = cssVar('--border', '#dfe4ec')
+  const labels = rows.map((row) => row.name)
+  return {
+    color: [accent],
+    grid: { left: 10, right: 16, top: 18, bottom: 48, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      valueFormatter: (value: unknown) => formatMetricNumber(value),
+    },
+    xAxis: {
+      type: 'category',
+      data: labels,
+      axisTick: { show: false },
+      axisLine: { lineStyle: { color: border } },
+      axisLabel: { color: muted, fontSize: 10, interval: 0, rotate: labels.length > 6 ? 30 : 0 },
+    },
+    yAxis: { type: 'value', splitLine: { lineStyle: { color: border, type: 'dashed' } }, axisLabel: { color: muted, fontSize: 10 } },
+    series: [{ name, type: 'bar', barMaxWidth: 24, data: rows.map((row) => row.value) }],
   }
 }
 function chartHasSize(el: HTMLElement | null): el is HTMLElement {
@@ -1987,7 +1983,7 @@ function multiLineOption(labels: string[], seriesKeys: string[], rows: Array<{ t
   return {
     color: palette,
     grid: { left: 10, right: 12, top: 18, bottom: 28, containLabel: true },
-    tooltip: { trigger: 'axis' },
+    tooltip: { trigger: 'axis', valueFormatter: (value: unknown) => formatMetricNumber(value) },
     legend: { type: 'scroll', top: 0, textStyle: { color: muted, fontSize: 11 } },
     xAxis: { type: 'category', boundaryGap: false, data: labels, axisTick: { show: false }, axisLine: { lineStyle: { color: border } }, axisLabel: { color: muted, fontSize: 10 } },
     yAxis: { type: 'value', splitLine: { lineStyle: { color: border, type: 'dashed' } }, axisLabel: { color: muted, fontSize: 10 } },
@@ -2029,6 +2025,8 @@ async function renderCharts() {
               : lineOption(energyTrend.value.map((item) => String(item.stat_period || item.stat_date || '')), energyTrend.value.map((item) => Number(item.usage_value || 0)), '运行趋势'),
             true,
           )
+        } else if (currentRealtimeChartRows.value.length) {
+          chart.setOption(realtimeBarOption(currentRealtimeChartRows.value, '实时快照'), true)
         } else {
           const labels = energyTrend.value.map((item) => String(item.stat_period || item.stat_date || ''))
           const values = energyTrend.value.map((item) => Number(item.usage_value || 0))
@@ -2365,7 +2363,7 @@ onBeforeUnmount(() => {
                   <div v-else class="archive-point-grid">
                     <article v-for="row in runtimeCards" :key="row.code" class="archive-point-card">
                       <b>{{ row.name }}</b>
-                      <strong>{{ isMissingValue(row.value) ? '-' : row.value }}</strong>
+                      <strong>{{ displayMetricValue(row.value) }}</strong>
                       <small>{{ row.unit || '—' }}</small>
                     </article>
                   </div>
@@ -2375,7 +2373,7 @@ onBeforeUnmount(() => {
           </div>
 
           <div v-else-if="(selectedIsDevice || selectedIsOrg) && ['history', 'alarm'].includes(activeArchiveTab)" class="archive-history-panel archive-device-data-panel">
-            <div class="archive-section-title"><i></i><h3>{{ activeArchiveTab === 'history' ? '计量历史' : '告警与工单' }}</h3><small>{{ activeArchiveTab === 'history' ? '设备测点历史趋势' : '告警事件与处置上下文' }}</small></div>
+            <div class="archive-section-title"><i></i><h3>{{ activeArchiveTab === 'history' ? '计量历史' : '告警与工单' }}</h3><small>{{ activeArchiveTab === 'history' ? '按采集批次聚合的真实历史数据' : '告警事件与处置上下文' }}</small></div>
             <div class="archive-query-row history-toolbar-row">
               <template v-if="activeArchiveTab === 'history'">
                 <div class="history-period-tabs">
@@ -2384,6 +2382,7 @@ onBeforeUnmount(() => {
                 <button v-if="historyGranularity !== 'total'" class="quiet archive-period-arrow" type="button" title="上一周期" @click="shiftHistoryPeriod(-1)">‹</button>
                 <strong class="archive-period-label">{{ historyPeriod.label }}</strong>
                 <button v-if="historyGranularity !== 'total'" class="quiet archive-period-arrow" type="button" title="下一周期" @click="shiftHistoryPeriod(1)">›</button>
+                <button class="quiet history-view-toggle" type="button" @click="toggleDataView">{{ dataView === 'chart' ? '历史表格' : '历史图表' }}</button>
               </template>
               <button class="icon-btn" title="刷新" aria-label="刷新" @click="activeArchiveTab === 'history' ? loadMetricView() : refreshSelected()"><RefreshCw :size="16" /></button>
             </div>
@@ -2396,15 +2395,22 @@ onBeforeUnmount(() => {
                   <div v-if="dataView === 'chart'" ref="historyChartEl" class="archive-history-chart"></div>
                   <div v-if="dataView === 'table'" class="archive-data-table archive-scroll-table">
                     <div v-if="!historyDisplayRows.length" class="archive-no-data">暂无计量历史。</div>
-                    <div v-for="row in historyDisplayRows" :key="row.time" class="archive-history-row">
-                      <div class="archive-history-time">{{ row.time }}</div>
-                      <div class="archive-history-grid">
-                        <span v-for="column in historyDisplayKeys" :key="column">
-                          <b>{{ column }}</b>
-                          <small>{{ displayValue(row.values[column]) }}</small>
-                        </span>
+                    <template v-else>
+                      <div class="archive-wide-history-head">
+                        <span>采集时间</span>
+                        <span v-for="column in historyDisplayKeys" :key="column">{{ column }}</span>
                       </div>
-                    </div>
+                      <div v-for="row in historyDisplayRows" :key="row.time" class="archive-wide-history-row">
+                        <span>{{ row.time }}</span>
+                        <span v-for="column in historyDisplayKeys" :key="column">{{ displayMetricValue(row.values[column]) }}</span>
+                      </div>
+                      <div v-if="selectedIsDevice && rawHistoryTotal" class="table-pagination archive-table-pagination">
+                        <span>共 {{ rawHistoryTotal }} 批</span>
+                        <button class="quiet" :disabled="rawHistoryPage <= 1" @click="changeRawHistoryPage(rawHistoryPage - 1)">上一页</button>
+                        <button v-for="item in Array.from({ length: Math.min(5, rawHistoryPageCount) }, (_, index) => Math.max(1, Math.min(rawHistoryPageCount, rawHistoryPage - 2 + index)))" :key="item" class="page-number" :class="{ active: item === rawHistoryPage }" @click="changeRawHistoryPage(item)">{{ item }}</button>
+                        <button class="quiet" :disabled="rawHistoryPage >= rawHistoryPageCount" @click="changeRawHistoryPage(rawHistoryPage + 1)">下一页</button>
+                      </div>
+                    </template>
                   </div>
                 </div>
               </div>
@@ -2482,7 +2488,7 @@ onBeforeUnmount(() => {
             <p>{{ item.org_name || '未分配组织' }} / {{ item.gateway_name || item.gateway_sn || '未绑定网关' }}</p>
           </div>
           <div class="device-card-actions">
-            <StatusTag domain="online" :value="item.status" />
+            <StatusTag domain="online" :value="item.online_status" />
             <button class="icon-btn" title="查看设备详情" aria-label="查看设备详情" @click="router.push(`/device-archive/devices/${item.id}`)"><FileText :size="16" /></button>
           </div>
         </article>
@@ -2520,7 +2526,6 @@ onBeforeUnmount(() => {
                 <button class="quiet" :class="{ active: detailWorkspaceTab === 'billing' }" @click="detailWorkspaceTab = 'billing'">计量与结算</button>
                 <button class="quiet" :class="{ active: detailWorkspaceTab === 'attributes' }" @click="detailWorkspaceTab = 'attributes'">属性配置</button>
                 <button class="quiet" :class="{ active: detailWorkspaceTab === 'points' }" @click="detailWorkspaceTab = 'points'">测点配置</button>
-                <button class="icon-btn danger-text" title="删除设备" aria-label="删除设备" @click="deleteSelected"><Trash2 :size="16" /></button>
               </div>
             </div>
 
@@ -2534,8 +2539,8 @@ onBeforeUnmount(() => {
                   <div class="archive-section-title"><i></i><h3>最近计量</h3><small>日统计</small></div>
                   <div class="compact-list">
                     <div v-for="row in recentHistory" :key="String(row.id || `${row.stat_date}-${row.point_code}`)">
-                      <b>{{ row.point_code }} · {{ row.usage_value ?? '—' }}</b>
-                      <span>{{ row.stat_date }} / 完整率 {{ row.data_complete_rate ?? '—' }}%</span>
+                      <b>{{ pointDisplayName(row.point_code) }} · {{ displayMetricValue(row.usage_value) }}</b>
+                      <span>{{ row.stat_date }} / 完整率 {{ displayMetricValue(row.data_complete_rate) }}%</span>
                     </div>
                     <div v-if="!recentHistory.length"><b>暂无计量记录</b><span>日统计写入后将在此展示。</span></div>
                   </div>
@@ -2608,7 +2613,7 @@ onBeforeUnmount(() => {
               <div class="point-workspace-toolbar">
                 <div class="point-workspace-note">
                   <AlertTriangle :size="14" />
-                  <span>{{ catalogManagedDevice ? '当前测点继承自已发布型号版本，仅可查看；修改请创建新的型号版本。' : '历史测点属于当前设备类型，保存后同类型设备共用。' }}</span>
+                  <span>当前测点来自已发布的产品版本；需要调整时，请在产品目录创建新版本并重新发布。</span>
                 </div>
                 <div class="point-workspace-actions">
                   <div class="detail-view-filters">
@@ -2618,8 +2623,7 @@ onBeforeUnmount(() => {
                       <div><label v-for="role in pointRoleOptions" :key="role"><input type="checkbox" :checked="pointRoleFilters.includes(role)" @change="toggleDetailFilter('point', role, ($event.target as HTMLInputElement).checked)"><span>{{ role }}</span></label></div>
                     </details>
                   </div>
-                  <button v-if="catalogManagedDevice" class="quiet" @click="router.push('/archive/catalog')">打开产品目录</button>
-                  <button v-else class="primary" :disabled="pointSaving" @click="savePointDrafts">{{ pointSaving ? '保存中...' : '保存测点' }}</button>
+                  <button class="quiet" @click="router.push('/archive/catalog')">打开产品目录</button>
                   <button class="quiet" @click="openParsePreview">样例解析校验</button>
                 </div>
               </div>
@@ -2633,10 +2637,6 @@ onBeforeUnmount(() => {
                           <b>{{ point.point_name || '未命名测点' }}</b>
                           <span class="point-status" :class="{ off: Number(point.enabled) !== 1 }"><i></i>{{ Number(point.enabled) === 1 ? '启用' : '未启用' }}</span>
                         </div>
-                        <div v-if="!catalogManagedDevice" class="point-card-actions">
-                          <button class="icon-btn" title="修改测点" aria-label="修改测点" @click="editPointDraft(point)"><Pencil :size="15" /></button>
-                          <button class="icon-btn danger-text" title="删除测点" aria-label="删除测点" @click="removePointDraft(pointDrafts.indexOf(point))"><Trash2 :size="15" /></button>
-                        </div>
                       </div>
                       <dl class="point-card-info">
                         <dt>编码</dt><dd>{{ point.point_code || '—' }}</dd>
@@ -2646,27 +2646,9 @@ onBeforeUnmount(() => {
                         <dt>计费</dt><dd>{{ Number(point.billable) === 1 ? '是' : '否' }}</dd>
                         <dt>统计</dt><dd>{{ Number(point.stat_enabled) === 1 ? '是' : '否' }}</dd>
                       </dl>
-                      <button v-if="!catalogManagedDevice" class="point-enable-switch" :class="{ off: Number(point.enabled) !== 1 }" :title="Number(point.enabled) === 1 ? '停用测点' : '启用测点'" :aria-label="Number(point.enabled) === 1 ? '停用测点' : '启用测点'" @click="togglePointEnabled(point)"><i></i></button>
                     </article>
                   </div>
                 </div>
-                <aside v-if="pointEditor && !catalogManagedDevice" class="point-editor-panel">
-                  <div class="point-editor-head">
-                    <h4>{{ pointEditingKey ? '修改测点' : '新增测点' }}</h4>
-                    <span>{{ pointEditor.point_name || pointEditor.point_code || '待配置' }}</span>
-                  </div>
-                  <div class="point-editor-fields">
-                    <label><span>测点编码</span><input v-model.trim="pointEditor.point_code" placeholder="total_active_energy"></label>
-                    <label><span>测点名称</span><input v-model.trim="pointEditor.point_name" placeholder="总有功电能"></label>
-                    <label><span>数据类型</span><AppSelect v-model="pointEditor.data_type"><option>DOUBLE</option><option>INTEGER</option><option>STRING</option></AppSelect></label>
-                    <label><span>单位</span><input v-model.trim="pointEditor.unit" placeholder="kWh"></label>
-                    <label><span>业务角色</span><input v-model.trim="pointEditor.business_role" placeholder="INSTANT_VALUE"></label>
-                    <label><span>可计费</span><AppSelect v-model.number="pointEditor.billable"><option :value="0">否</option><option :value="1">是</option></AppSelect></label>
-                    <label><span>纳入统计</span><AppSelect v-model.number="pointEditor.stat_enabled"><option :value="1">是</option><option :value="0">否</option></AppSelect></label>
-                    <label><span>启用状态</span><AppSelect v-model.number="pointEditor.enabled"><option :value="1">启用</option><option :value="0">未启用</option></AppSelect></label>
-                  </div>
-                  <button class="primary point-confirm-btn" @click="confirmPointDraft">{{ pointEditingKey ? '确认修改' : '确认新增' }}</button>
-                </aside>
               </div>
             </template>
           </article>
@@ -2848,4 +2830,4 @@ onBeforeUnmount(() => {
 .detail-view-filters{display:flex;align-items:center;gap:7px}.detail-view-filters input,.detail-view-filters select{height:30px;min-width:150px;padding:0 8px;border:1px solid var(--border);background:#fff;color:#52667e;font-size:11px}.attribute-view-table{margin:14px;overflow:auto;border:1px solid var(--border)}.attribute-view-table table{width:100%;min-width:720px;border-collapse:collapse;font-size:12px}.attribute-view-table th,.attribute-view-table td{height:38px;padding:7px 10px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap}.attribute-view-table th{background:#f7f9fc;color:#5b6e84;font-weight:600}@media(max-width:860px){.detail-view-filters{width:100%;flex-wrap:wrap}.detail-view-filters input,.detail-view-filters select{flex:1;min-width:130px}}
 .device-filter-field{min-width:190px}.device-search-field{min-width:min(330px,100%)}.device-filter-menu,.detail-filter-menu{position:relative;width:100%;min-width:0}.device-filter-menu summary,.detail-filter-menu summary{height:36px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 11px;border:1px solid #d4e2f2;border-radius:7px;background:#fff;color:#3d5876;cursor:pointer;list-style:none;box-shadow:0 1px 2px #17375c08;transition:border-color .18s,box-shadow .18s}.device-filter-menu summary::-webkit-details-marker,.detail-filter-menu summary::-webkit-details-marker{display:none}.device-filter-menu summary:hover,.detail-filter-menu summary:hover{border-color:var(--accent);box-shadow:0 0 0 3px #4c8dff12}.device-filter-menu[open]>div,.detail-filter-menu[open]>div{position:absolute;top:42px;left:0;z-index:12;display:grid;gap:3px;width:max-content;min-width:100%;max-width:min(360px,calc(100vw - 38px));max-height:260px;padding:8px;border:1px solid #d4e2f2;border-radius:8px;background:#fff;box-shadow:0 14px 30px #17375c20;overflow:auto;scrollbar-width:none}.device-filter-menu[open]>div::-webkit-scrollbar,.detail-filter-menu[open]>div::-webkit-scrollbar{display:none}.device-filter-menu label,.detail-filter-menu label{display:flex;align-items:center;gap:7px;min-height:30px;padding:0 8px;border-radius:5px;color:#38536f;font-size:12px;white-space:nowrap;cursor:pointer}.device-filter-menu label:hover,.detail-filter-menu label:hover{background:#f0f6ff;color:var(--accent)}.device-filter-menu input[type='checkbox'],.detail-filter-menu input[type='checkbox']{box-sizing:border-box;width:12px;height:12px;min-width:12px;max-width:12px;min-height:12px;max-height:12px;margin:0;padding:0;flex:0 0 12px;accent-color:var(--accent)}.device-filter-menu.disabled summary{border-style:dashed;background:#f7f9fc;color:#9aaabd;cursor:not-allowed}.filter-menu-hint{margin:2px 4px;padding:7px 8px;color:#8494a8;font-size:11px;white-space:nowrap}.detail-filter-search{height:36px;display:flex;align-items:center;gap:7px;min-width:220px;padding:0 10px;border:1px solid #d4e2f2;border-radius:7px;background:#fff;color:#7890aa}.detail-filter-search input{min-width:0;width:100%;height:auto!important;padding:0!important;border:0!important;box-shadow:none!important;outline:0}.detail-filter-menu{width:190px}.detail-filter-menu summary{font-size:11px}.detail-filter-menu[open]>div{right:0;left:auto}.detail-view-filters{display:flex;align-items:center;gap:8px}
 .device-card-media,.device-detail-image{display:grid;place-items:center;overflow:hidden;background:#f7f9fc;color:#8da1b7}.device-card-media img,.device-detail-image img{width:100%;height:100%;object-fit:cover;display:block}.device-detail-image{width:100%;aspect-ratio:4/3;border:1px solid var(--border);border-radius:8px}
-.device-context-grid--single{grid-template-columns:minmax(0,1fr)}.device-alarm-filters{margin:0 0 10px;flex-wrap:wrap}.device-alarm-filters .detail-filter-search{flex:1;min-width:240px}.detail-filter-select{height:30px;min-width:150px;padding:0 8px;border:1px solid var(--border);border-radius:6px;background:#fff;color:#52667e;font-size:11px}.device-context-table-card{overflow:hidden}.device-context-table-card .archive-full-table{border:1px solid #d9e5f2;border-radius:10px;background:#fbfdff;overflow:auto}.device-context-table-card .archive-full-table-head{background:#edf4fb;color:#49637f;font-weight:700;min-height:40px}.device-context-table-card .archive-full-table-row{min-height:44px;border-bottom:1px solid #e8eff6;transition:background .18s ease}.device-context-table-card .archive-full-table-row:hover{background:#f1f7ff}.device-context-table-card .archive-full-table-row span{color:#49627c}.device-context-table-card .archive-table-pagination{padding:10px 4px 0}.billing-dashboard-grid--compact{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.billing-dashboard-grid--compact .billing-dashboard-chart{min-height:280px}.billing-dashboard-grid--compact .billing-dashboard-prepared,.billing-dashboard-grid--compact .billing-dashboard-entry{grid-column:span 1}.billing-dashboard-grid--compact .billing-dashboard-prepared{grid-row:2}.billing-dashboard-grid--compact .billing-dashboard-entry{grid-row:2}.billing-stat-chart{width:100%;height:240px;min-height:240px}.settlement-switch-card{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:104px;padding:18px;border:1px solid #dce5ec;border-radius:12px;background:#f7f9fb}.settlement-switch-card.enabled{border-color:#c8ded8;background:#f4faf8}.settlement-switch-card>div{min-width:0}.settlement-switch-card b,.settlement-switch-card span{display:block}.settlement-switch-card b{color:#334b5e;font-size:17px}.settlement-switch-card span{margin-top:7px;color:#788b9b;font-size:12px;line-height:1.6}.settlement-switch-card button{flex:none;min-width:92px}@media(max-width:760px){.billing-dashboard-grid--compact{grid-template-columns:1fr}.billing-dashboard-grid--compact .billing-dashboard-prepared,.billing-dashboard-grid--compact .billing-dashboard-entry{grid-column:auto;grid-row:auto}.settlement-switch-card{align-items:flex-start;flex-direction:column}.settlement-switch-card button{width:100%}}</style>
+.device-context-grid--single{grid-template-columns:minmax(0,1fr)}.device-alarm-filters{margin:0 0 10px;flex-wrap:wrap}.device-alarm-filters .detail-filter-search{flex:1;min-width:240px}.detail-filter-select{height:30px;min-width:150px;padding:0 8px;border:1px solid var(--border);border-radius:6px;background:#fff;color:#52667e;font-size:11px}.device-context-table-card{overflow:hidden}.device-context-table-card .archive-full-table{border:1px solid #d9e5f2;border-radius:10px;background:#fbfdff;overflow:auto}.device-context-table-card .archive-full-table-head{background:#edf4fb;color:#49637f;font-weight:700;min-height:40px}.device-context-table-card .archive-full-table-row{min-height:44px;border-bottom:1px solid #e8eff6;transition:background .18s ease}.device-context-table-card .archive-full-table-row:hover{background:#f1f7ff}.device-context-table-card .archive-full-table-row span{color:#49627c}.device-context-table-card .archive-table-pagination{padding:10px 4px 0}.billing-dashboard-grid--compact{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.billing-dashboard-grid--compact .billing-dashboard-chart{min-height:280px}.billing-dashboard-grid--compact .billing-dashboard-prepared,.billing-dashboard-grid--compact .billing-dashboard-entry{grid-column:span 1}.billing-dashboard-grid--compact .billing-dashboard-prepared{grid-row:2}.billing-dashboard-grid--compact .billing-dashboard-entry{grid-row:2}.billing-stat-chart{width:100%;height:240px;min-height:240px}.settlement-switch-card{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:104px;padding:18px;border:1px solid #dce5ec;border-radius:12px;background:#f7f9fb}.settlement-switch-card.enabled{border-color:#c8ded8;background:#f4faf8}.settlement-switch-card>div{min-width:0}.settlement-switch-card b,.settlement-switch-card span{display:block}.settlement-switch-card b{color:#334b5e;font-size:17px}.settlement-switch-card span{margin-top:7px;color:#788b9b;font-size:12px;line-height:1.6}.settlement-switch-card button{flex:none;min-width:92px}@media(max-width:760px){.billing-dashboard-grid--compact{grid-template-columns:1fr}.billing-dashboard-grid--compact .billing-dashboard-prepared,.billing-dashboard-grid--compact .billing-dashboard-entry{grid-column:auto;grid-row:auto}.settlement-switch-card{align-items:flex-start;flex-direction:column}.settlement-switch-card button{width:100%}}.history-view-toggle{height:26px;padding:0 10px;border:1px solid #cbdced;border-radius:5px;background:#fff;color:#55718e;font-size:11px;white-space:nowrap}.history-view-toggle:hover{border-color:var(--accent);background:#f2f8ff;color:var(--accent)}.archive-wide-history-head,.archive-wide-history-row{display:grid;grid-template-columns:180px repeat(auto-fit,minmax(120px,1fr));min-width:max-content}.archive-wide-history-head{position:sticky;top:0;z-index:2;border-bottom:1px solid #d7e4f0;background:#f4f8fc;color:#55718e;font-weight:700}.archive-wide-history-row{border-bottom:1px solid #edf2f7;background:#fff}.archive-wide-history-row:nth-child(odd){background:#fbfcfe}.archive-wide-history-head span,.archive-wide-history-row span{min-width:0;padding:9px 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}.archive-wide-history-row span{color:#385675}.archive-wide-history-head span:first-child,.archive-wide-history-row span:first-child{position:sticky;left:0;background:inherit}.archive-scroll-table{overflow:auto}.archive-wide-history-head+ .archive-wide-history-row{}.billing-dashboard-grid--compact{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.billing-dashboard-grid--compact .billing-dashboard-chart{min-height:280px}.billing-dashboard-grid--compact .billing-dashboard-prepared,.billing-dashboard-grid--compact .billing-dashboard-entry{grid-column:span 1}.billing-dashboard-grid--compact .billing-dashboard-prepared{grid-row:2}.billing-dashboard-grid--compact .billing-dashboard-entry{grid-row:2}.billing-stat-chart{width:100%;height:240px;min-height:240px}.settlement-switch-card{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:104px;padding:18px;border:1px solid #dce5ec;border-radius:12px;background:#f7f9fb}.settlement-switch-card.enabled{border-color:#c8ded8;background:#f4faf8}.settlement-switch-card>div{min-width:0}.settlement-switch-card b,.settlement-switch-card span{display:block}.settlement-switch-card b{color:#334b5e;font-size:17px}.settlement-switch-card span{margin-top:7px;color:#788b9b;font-size:12px;line-height:1.6}.settlement-switch-card button{flex:none;min-width:92px}@media(max-width:760px){.billing-dashboard-grid--compact{grid-template-columns:1fr}.billing-dashboard-grid--compact .billing-dashboard-prepared,.billing-dashboard-grid--compact .billing-dashboard-entry{grid-column:auto;grid-row:auto}.settlement-switch-card{align-items:flex-start;flex-direction:column}.settlement-switch-card button{width:100%}}</style>
