@@ -6,8 +6,8 @@ import publicSecurityBadge from '@/assets/public-security-badge.png'
 import { useRoute, useRouter } from 'vue-router'
 import { useSessionStore } from '@/stores/session'
 
-const username = ref('admin')
-const password = ref('123456')
+const username = ref('')
+const password = ref('')
 const captcha = ref('')
 const captchaInput = ref('')
 const consentChecked = ref(false)
