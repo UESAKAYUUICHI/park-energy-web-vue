@@ -31,6 +31,7 @@ const navIcons: Record<string, Component> = {
   'device-archive-org-tree': Network,
   'device-archive-devices': Gauge,
   'product-catalog': Boxes,
+  'protocol-catalog': Cable,
   'global-attributes': Tags,
   'global-points': Crosshair,
   'power-efficiency': BarChart3,
@@ -66,7 +67,6 @@ const navIcons: Record<string, Component> = {
   'archive-devices': Cpu,
   'archive-device-types': Tags,
   'archive-point-definitions': Crosshair,
-  'archive-point-mappings': Cable,
   'alarms-rules': BadgeCheck,
   'operations-work-orders': Wrench,
   'system-users': Users,
@@ -93,13 +93,13 @@ const item = (name: string): NavItem => {
 }
 const nav = computed<NavGroup[]>((): NavGroup[] => [
   { key: 'dashboard', label: '数据总览', icon: groupIcon('dashboard'), items: [item('dashboard'), item('energy-screen')] },
-  { key: 'assets', label: '组织和资产', icon: groupIcon('assets'), items: [item('device-archive-org-tree'), item('device-archive-devices'), item('product-catalog'), item('global-attributes'), item('global-points')] },
+  { key: 'assets', label: '组织和资产', icon: groupIcon('assets'), items: [item('device-archive-org-tree'), item('device-archive-devices'), item('product-catalog'), item('protocol-catalog'), item('global-attributes'), item('global-points')] },
   { key: 'efficiency', label: '能效与分析', icon: groupIcon('efficiency'), items: [item('power-efficiency')], forceCollapsible: true },
   { key: 'operations', label: '告警与运维', icon: groupIcon('operations'), items: [item('alarms-events'), item('operations-work-orders'), item('alarms-rules')] },
   { key: 'access', label: '设备接入', icon: groupIcon('access'), items: [item('access-diagnostic'), item('edge-config'), item('access-control'), item('access-commands')] },
   { key: 'billing', label: '结算与财务', icon: groupIcon('revenue'), items: [item('billing-overview'), item('billing-rules-workspace'), item('billing-payment-workspace'), item('billing-archive-workspace')] },
   { key: 'system', label: '系统治理', icon: groupIcon('system'), sections: [
-    { label: '基础档案', items: [item('archive-orgs'), item('archive-spaces'), item('archive-gateways'), item('archive-devices'), item('archive-device-types'), item('archive-point-definitions'), item('archive-point-mappings')] },
+    { label: '基础档案', items: isAdmin.value ? [item('archive-orgs'), item('archive-spaces'), item('archive-gateways'), item('archive-devices'), item('archive-device-types'), item('archive-point-definitions')] : [] },
     { label: '权限与审计', items: isAdmin.value ? [item('system-users'), item('system-tenants'), item('system-roles'), item('system-permissions'), item('system-rbac-workbench'), item('system-user-org-bindings'), item('system-audit')] : [item('system-rbac-workbench'), item('system-audit')] },
   ] },
 ])
