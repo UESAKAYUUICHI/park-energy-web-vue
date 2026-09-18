@@ -1,386 +1,100 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AlertTriangle, CheckCircle2, GitCommitHorizontal, Plus, RefreshCw, Router, Save, Send, ShieldCheck, Trash2 } from '@lucide/vue'
-import { edgeConfigGateway, edgeConfigOverview, probeEdgeDevice, publishEdgeConfig, replaceEdgeModelPoints, updateEdgeDeviceBinding } from '@/api/platform'
+import { Activity, AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Edit3, History, Link2, ListChecks, Play, Plus, RefreshCw, Router, Send, Settings2, Trash2, Unlink } from '@lucide/vue'
+import AppDialog from '@/components/app/AppDialog.vue'
+import { createEdgeChannel, deleteEdgeChannel, edgeConfigGateway, edgeConfigOverview, edgeDeviceCandidates, probeEdgeDevice, publishEdgeConfig, unbindDevice, updateEdgeChannel, updateEdgeDeviceBinding } from '@/api/platform'
 import type { RecordRow } from '@/types/domain'
 
-const loading = ref(false)
-const saving = ref(false)
-const probing = ref<unknown>(null)
-const publishing = ref(false)
-const overview = ref<RecordRow>({})
-const detail = ref<RecordRow>({})
-const selectedGatewayId = ref<unknown>(null)
-const deviceDrafts = ref<Record<string, { channelId: string; modbusAddr: number; collectIntervalSeconds: number }>>({})
-const selectedModelId = ref<unknown>(null)
-const pointDrafts = ref<RecordRow[]>([])
+interface ChannelDraft { channelId:string;channelName:string;protocol:string;serialPort:string;baudRate:number;dataBits:number;stopBits:number;parity:string;timeoutMs:number;retryCount:number;pollIntervalSeconds:number;enabled:number;remark:string }
+interface BindingDraft { channelId:string;modbusAddr:number;collectIntervalSeconds:number }
 
-const gateways = computed(() => overview.value.gateways as RecordRow[] || [])
-const summary = computed(() => overview.value.summary as RecordRow || {})
-const gateway = computed(() => detail.value.gateway as RecordRow || {})
-const devices = computed(() => detail.value.devices as RecordRow[] || [])
-const channels = computed(() => detail.value.channels as RecordRow[] || [])
-const models = computed(() => detail.value.models as RecordRow[] || [])
-const resources = computed(() => detail.value.resources as RecordRow[] || [])
-const audit = computed(() => detail.value.audit as RecordRow[] || [])
-const precheck = computed(() => detail.value.precheck as RecordRow || {})
-const issues = computed(() => precheck.value.issues as RecordRow[] || [])
-const selectedGateway = computed(() => gateways.value.find((item) => String(item.gatewayId) === String(selectedGatewayId.value)) || gateways.value[0])
-const selectedModel = computed(() => models.value.find((item) => String(item.modelVersionId) === String(selectedModelId.value)) || models.value[0])
-const syncState = computed(() => String(gateway.value.applyStatus || selectedGateway.value?.applyStatus || 'NEVER'))
-const checksumMatched = computed(() => {
-  const desired = String(gateway.value.desiredChecksum || '')
-  const applied = String(gateway.value.appliedChecksum || '')
-  return Boolean(desired && applied && desired === applied)
-})
-const deviceRows = computed(() => devices.value.map((device) => {
-  const key = String(device.deviceId)
-  const draft = deviceDrafts.value[key] || {
-    channelId: String(device.channelId || 'rs485-1'),
-    modbusAddr: Number(device.modbusAddr || 1),
-    collectIntervalSeconds: Number(device.collectIntervalSeconds || 300)
-  }
-  return { device, draft }
+const loading=ref(false),saving=ref(false),bindingLoading=ref(false),publishing=ref(false)
+const probing=ref<unknown>(null),selectedGatewayId=ref<unknown>(null),selectedModelId=ref<unknown>(null)
+const overview=ref<RecordRow>({}),detail=ref<RecordRow>({}),feedback=ref('')
+const expandedChannels=ref<Set<string>>(new Set())
+const channelDialog=ref(false),bindingDialog=ref(false),pointDialog=ref(false),historyDialog=ref(false)
+const editingChannelId=ref(''),bindingKeyword=ref(''),bindingChannelId=ref(''),bindingModelFilter=ref('')
+const bindingStatusFilter=ref('unbound')
+const channelForm=ref<ChannelDraft>(channelDraft()),bindingDeviceRows=ref<RecordRow[]>([]),bindingDrafts=ref<Record<string,BindingDraft>>({})
+
+const gateways=computed(()=>overview.value.gateways as RecordRow[]||[]),summary=computed(()=>overview.value.summary as RecordRow||{})
+const gateway=computed(()=>detail.value.gateway as RecordRow||{}),devices=computed(()=>detail.value.devices as RecordRow[]||[])
+const channels=computed(()=>(detail.value.channels as RecordRow[]||[]).filter(x=>String(x.channelId)!=='未绑定'))
+const models=computed(()=>detail.value.models as RecordRow[]||[]),ports=computed(()=>detail.value.ports as RecordRow[]||[])
+const releases=computed(()=>detail.value.releases as RecordRow[]||[]),resources=computed(()=>detail.value.resources as RecordRow[]||[])
+const precheck=computed(()=>detail.value.precheck as RecordRow||{}),issues=computed(()=>precheck.value.issues as RecordRow[]||[])
+const selectedGateway=computed(()=>gateways.value.find(x=>String(x.gatewayId)===String(selectedGatewayId.value))||gateways.value[0])
+const syncState=computed(()=>String(gateway.value.applyStatus||selectedGateway.value?.applyStatus||'NEVER'))
+const selectedModel=computed(()=>models.value.find(x=>String(x.modelVersionId)===String(selectedModelId.value))||models.value[0])
+const activeChannels=computed(()=>channels.value.filter(x=>Number(x.enabled??1)===1))
+const feedbackIsError=computed(()=>/失败|未通过|无法|错误/.test(feedback.value))
+const bindingRows=computed(()=>bindingDeviceRows.value.map(device=>({device,draft:bindingDrafts.value[String(device.deviceId)]||defaultBinding(device)})))
+const bindingModelOptions=computed(()=>{const map=new Map<string,string>();bindingDeviceRows.value.forEach(d=>{const id=String(d.modelVersionId||'');if(id)map.set(id,String(d.modelName||d.profileKey||d.modelVersion||id))});return [...map.entries()].map(([value,label])=>({value,label}))})
+const filteredBindingRows=computed(()=>bindingRows.value.filter(row=>{
+  const status=String(bindingStatusFilter.value)
+  const gatewayId=String(row.device.gatewayId||'')
+  const isCurrent=gatewayId&&gatewayId===String(selectedGatewayId.value)
+  const isUnbound=!gatewayId
+  return (!bindingModelFilter.value||String(row.device.modelVersionId)===String(bindingModelFilter.value))
+    && (status==='all'||(status==='unbound'&&isUnbound)||(status==='current'&&isCurrent))
 }))
+const portOptions=computed(()=>{const map=new Map<string,RecordRow>();ports.value.forEach(p=>map.set(String(p.systemPath||p.portKey),p));channels.value.forEach(c=>{const path=String(c.serialPort||'');if(path&&!map.has(path))map.set(path,{systemPath:path,portKey:path,available:0})});return [...map.values()]})
 
-function stateLabel(value: unknown) {
-  const state = String(value || 'NEVER')
-  if (state === 'APPLIED') return '已应用'
-  if (state === 'PENDING') return '待同步'
-  if (state === 'FAILED') return '应用失败'
-  if (state === 'RESTART_REQUIRED') return '需重启'
-  return '未同步'
-}
+function stateLabel(v:unknown){return ({APPLIED:'已应用',PENDING:'待同步',FAILED:'应用失败',RESTART_REQUIRED:'需重启',NEVER:'未发布'} as Record<string,string>)[String(v||'NEVER')]||String(v)}
+function stateTone(v:unknown){const s=String(v||'NEVER');return s==='APPLIED'?'ok':s==='FAILED'?'bad':s==='PENDING'||s==='RESTART_REQUIRED'?'warn':'muted'}
+function shortHash(v:unknown){const s=String(v||'');return s?s.slice(0,10):'-'}
+function channelDraft(c:RecordRow={}):ChannelDraft{return{channelId:String(c.channelId||''),channelName:String(c.channelName||''),protocol:'MODBUS_RTU',serialPort:String(c.serialPort||''),baudRate:Number(c.baudRate||9600),dataBits:Number(c.dataBits||8),stopBits:Number(c.stopBits||1),parity:String(c.parity||'N'),timeoutMs:Number(c.timeoutMs||1000),retryCount:Number(c.retryCount??2),pollIntervalSeconds:Number(c.pollIntervalSeconds||300),enabled:Number(c.enabled??1),remark:String(c.remark||'')}}
+function channelDevices(id:unknown){return devices.value.filter(d=>String(d.channelId)===String(id))}
+function modelOf(d:RecordRow){return models.value.find(m=>String(m.modelVersionId)===String(d.modelVersionId))}
+function toggleChannel(id:unknown){const next=new Set(expandedChannels.value),key=String(id);next.has(key)?next.delete(key):next.add(key);expandedChannels.value=next}
+function expandAll(){expandedChannels.value=new Set(channels.value.map(c=>String(c.channelId)))}
+function usedAddresses(channelId:unknown, excludeDeviceId:unknown=''){return new Set(devices.value.filter(d=>String(d.channelId)===String(channelId)&&String(d.deviceId)!==String(excludeDeviceId)).map(d=>Number(d.modbusAddr)).filter(n=>n>=1&&n<=247))}
+function nextAddress(channelId:unknown, preferred=0, excludeDeviceId:unknown=''){const used=usedAddresses(channelId,excludeDeviceId);if(preferred>=1&&preferred<=247&&!used.has(preferred))return preferred;for(let i=1;i<=247;i+=1)if(!used.has(i))return i;return 1}
+function defaultBinding(d:RecordRow):BindingDraft{const channelId=String(d.channelId||bindingChannelId.value||activeChannels.value[0]?.channelId||''),channel=channels.value.find(c=>String(c.channelId)===channelId);return{channelId,modbusAddr:nextAddress(channelId,Number(d.modbusAddr||0),d.deviceId),collectIntervalSeconds:Number(d.collectIntervalSeconds||channel?.pollIntervalSeconds||300)}}
+function applyBindingChannel(deviceId:unknown, channelId:unknown){const key=String(deviceId),current=bindingDrafts.value[key]||defaultBinding({deviceId});bindingDrafts.value={...bindingDrafts.value,[key]:{...current,channelId:String(channelId),modbusAddr:nextAddress(channelId,current.modbusAddr,deviceId)}}}
+function bindingInvalid(row:{device:RecordRow;draft:BindingDraft}){return !row.draft.channelId||row.draft.modbusAddr<1||row.draft.modbusAddr>247||usedAddresses(row.draft.channelId,row.device.deviceId).has(Number(row.draft.modbusAddr))}
 
-function stateTone(value: unknown) {
-  const state = String(value || 'NEVER')
-  if (state === 'APPLIED') return 'ok'
-  if (state === 'PENDING' || state === 'RESTART_REQUIRED') return 'warn'
-  if (state === 'FAILED') return 'bad'
-  return 'muted'
-}
-
-function shortHash(value: unknown) {
-  const text = String(value || '')
-  return text ? text.slice(0, 12) : '-'
-}
-
-function fmt(value: unknown) {
-  if (!value) return '-'
-  return String(value).replace('T', ' ').slice(0, 19)
-}
-
-function syncDrafts() {
-  const drafts: Record<string, { channelId: string; modbusAddr: number; collectIntervalSeconds: number }> = {}
-  for (const device of devices.value) {
-    drafts[String(device.deviceId)] = {
-      channelId: String(device.channelId || 'rs485-1'),
-      modbusAddr: Number(device.modbusAddr || 1),
-      collectIntervalSeconds: Number(device.collectIntervalSeconds || 300)
-    }
-  }
-  deviceDrafts.value = drafts
-  selectedModelId.value = selectedModel.value?.modelVersionId
-  loadPointDrafts()
-}
-
-function loadPointDrafts() {
-  const points = (selectedModel.value?.points as RecordRow[] | undefined) || []
-  pointDrafts.value = points.map((point) => ({ ...point }))
-}
-
-async function load() {
-  loading.value = true
-  try {
-    overview.value = await edgeConfigOverview()
-    const firstGateway = gateways.value[0]
-    if (!selectedGatewayId.value && firstGateway) selectedGatewayId.value = firstGateway.gatewayId
-    if (selectedGatewayId.value) {
-      detail.value = await edgeConfigGateway(selectedGatewayId.value)
-      syncDrafts()
-    }
-  } finally {
-    loading.value = false
-  }
-}
-
-async function selectGateway(id: unknown) {
-  selectedGatewayId.value = id
-  detail.value = await edgeConfigGateway(id)
-  syncDrafts()
-}
-
-async function saveDevice(device: RecordRow) {
-  const draft = deviceDrafts.value[String(device.deviceId)]
-  if (!draft) return
-  saving.value = true
-  try {
-    detail.value = await updateEdgeDeviceBinding(device.deviceId, draft)
-    overview.value = await edgeConfigOverview()
-    syncDrafts()
-  } finally {
-    saving.value = false
-  }
-}
-
-async function probeDevice(device: RecordRow) {
-  probing.value = device.deviceId
-  try {
-    await probeEdgeDevice(device.deviceId)
-    if (selectedGatewayId.value) detail.value = await edgeConfigGateway(selectedGatewayId.value)
-  } finally {
-    probing.value = null
-  }
-}
-
-function addPoint() {
-  pointDrafts.value.push({
-    pointCode: 'new_point',
-    standardPointCode: 'NEW_POINT',
-    pointName: '新测点',
-    unit: '',
-    functionCode: 3,
-    registerAddress: 0,
-    registerLength: 1,
-    valueType: 'u16',
-    byteOrder: 'AB',
-    scaleFactor: 1,
-    offsetValue: 0,
-    required: 1,
-    enabled: 1,
-    sort: (pointDrafts.value.length + 1) * 10
-  })
-}
-
-function removePoint(index: number) {
-  pointDrafts.value.splice(index, 1)
-}
-
-async function savePoints() {
-  if (!selectedModel.value?.modelVersionId) return
-  saving.value = true
-  try {
-    await replaceEdgeModelPoints(selectedModel.value.modelVersionId, pointDrafts.value)
-    if (selectedGatewayId.value) detail.value = await edgeConfigGateway(selectedGatewayId.value)
-    overview.value = await edgeConfigOverview()
-    syncDrafts()
-  } finally {
-    saving.value = false
-  }
-}
-
-async function publish() {
-  if (!selectedGatewayId.value) return
-  publishing.value = true
-  try {
-    await publishEdgeConfig(selectedGatewayId.value)
-    await selectGateway(selectedGatewayId.value)
-    overview.value = await edgeConfigOverview()
-  } finally {
-    publishing.value = false
-  }
-}
-
+async function load(){loading.value=true;feedback.value='';try{overview.value=await edgeConfigOverview();if(!selectedGatewayId.value&&gateways.value[0])selectedGatewayId.value=gateways.value[0].gatewayId;if(selectedGatewayId.value)await selectGateway(selectedGatewayId.value)}catch(error){detail.value={};feedback.value=`加载失败：${error instanceof Error?error.message:'无法读取采集配置'}`}finally{loading.value=false}}
+async function selectGateway(id:unknown){selectedGatewayId.value=id;try{detail.value=await edgeConfigGateway(id);expandAll()}catch(error){detail.value={};feedback.value=`加载失败：${error instanceof Error?error.message:'无法读取网关配置'}`}}
+function openCreateChannel(){editingChannelId.value='';channelForm.value=channelDraft({serialPort:portOptions.value.find(p=>Number(p.available??1)===1)?.systemPath||''});channelDialog.value=true}
+function openEditChannel(c:RecordRow){editingChannelId.value=String(c.channelId);channelForm.value=channelDraft(c);channelDialog.value=true}
+async function saveChannel(){saving.value=true;try{editingChannelId.value?await updateEdgeChannel(selectedGatewayId.value,editingChannelId.value,channelForm.value as unknown as RecordRow):await createEdgeChannel(selectedGatewayId.value,channelForm.value as unknown as RecordRow);channelDialog.value=false;await selectGateway(selectedGatewayId.value);feedback.value='通道草稿已保存，网关实际打开串口后才会显示为已应用。'}finally{saving.value=false}}
+async function removeChannel(c:RecordRow){if(!confirm(`删除通道“${c.channelName||c.channelId}”？`))return;saving.value=true;try{await deleteEdgeChannel(selectedGatewayId.value,c.channelId);await selectGateway(selectedGatewayId.value);feedback.value='通道已删除。'}finally{saving.value=false}}
+async function openBinding(id:unknown=''){bindingChannelId.value=String(id||'');bindingKeyword.value='';bindingModelFilter.value='';bindingStatusFilter.value='unbound';bindingDialog.value=true;await loadBindingDevices()}
+async function loadBindingDevices(){bindingLoading.value=true;try{const result=await edgeDeviceCandidates(selectedGatewayId.value,{keyword:bindingKeyword.value});bindingDeviceRows.value=result.devices as RecordRow[]||[];const drafts:Record<string,BindingDraft>={};bindingDeviceRows.value.forEach(d=>drafts[String(d.deviceId)]=defaultBinding(d));bindingDrafts.value=drafts}finally{bindingLoading.value=false}}
+async function saveBinding(d:RecordRow){const draft=bindingDrafts.value[String(d.deviceId)];if(!draft)return;saving.value=true;try{await updateEdgeDeviceBinding(d.deviceId,{gatewayId:selectedGatewayId.value,...draft});await Promise.all([selectGateway(selectedGatewayId.value),loadBindingDevices()]);feedback.value=`${d.deviceName||d.deviceSn} 已加入 ${draft.channelId}。`}finally{saving.value=false}}
+async function detachDevice(d:RecordRow){if(!confirm(`将“${d.deviceName||d.deviceSn}”从当前网关解绑？`))return;saving.value=true;try{await unbindDevice(d.deviceId,{});await selectGateway(selectedGatewayId.value);feedback.value='设备已解绑。'}finally{saving.value=false}}
+async function probeDevice(d:RecordRow){probing.value=d.deviceId;try{await probeEdgeDevice(d.deviceId);feedback.value=`已向 ${d.deviceName||d.deviceSn} 下发立即读取命令。`}finally{probing.value=null}}
+function openPointDialog(id:unknown){if(!id){feedback.value='该设备没有产品版本，请先完善设备档案。';return}selectedModelId.value=id;pointDialog.value=true}
+function validateDraft(){feedback.value=precheck.value.passed?`校验通过：${precheck.value.deviceCount||0} 台设备，${precheck.value.pointCount||0} 个采集点。`:`校验未通过：${issues.value.length} 项问题。`}
+async function publish(){if(!precheck.value.passed){validateDraft();return}if(!confirm('将当前草稿发布为不可变配置版本？'))return;publishing.value=true;try{await publishEdgeConfig(selectedGatewayId.value);await selectGateway(selectedGatewayId.value);overview.value=await edgeConfigOverview();feedback.value='配置版本已发布，等待网关实际应用。'}finally{publishing.value=false}}
 onMounted(load)
 </script>
 
 <template>
-  <section class="view-page edge-config-page">
-    <header class="view-head">
-      <div>
-        <p class="eyebrow">EDGE COLLECTION</p>
-        <h1>采集配置</h1>
-        <p>统一维护网关、RS485 通道、从站地址、采集点表与应用状态。</p>
-      </div>
-      <div class="head-actions">
-        <button class="icon-btn" title="刷新" aria-label="刷新" :disabled="loading" @click="load"><RefreshCw :size="16" /></button>
-        <button class="primary" :disabled="publishing || !selectedGatewayId || precheck.passed === false" @click="publish"><Send :size="15" />发布配置</button>
-      </div>
-    </header>
+<section class="view-page edge-page"><div class="edge-shell">
+  <aside class="gateway-pane"><div class="pane-title"><Router :size="17"/><b>网关</b></div><div class="gateway-scroll"><button v-for="item in gateways" :key="String(item.gatewayId)" type="button" :class="['gateway-row',{active:String(item.gatewayId)===String(selectedGatewayId)}]" @click="selectGateway(item.gatewayId)"><span><b>{{item.gatewayName||item.gatewaySn}}</b><small>{{item.gatewaySn}} · {{item.orgName||'未分配组织'}}</small></span><i :class="stateTone(item.applyStatus)">{{stateLabel(item.applyStatus)}}</i></button><p v-if="!gateways.length" class="empty">暂无网关</p></div></aside>
+  <main class="workbench"><header class="titlebar"><div><h1>{{gateway.gatewayName||gateway.gatewaySn||'采集配置'}}</h1><p>南向采集配置 · 网关固定作为 Modbus 主站</p></div><div class="release-summary"><span><b>{{stateLabel(syncState)}}</b><small>期望 {{gateway.desiredRevision||'-'}} · 已应用 {{gateway.appliedRevision||'-'}}</small></span><button class="btn" @click="load"><RefreshCw :size="15"/>刷新</button><button class="btn" @click="validateDraft"><ListChecks :size="15"/>校验</button><button class="btn primary" :disabled="publishing||!selectedGatewayId||precheck.passed===false" @click="publish"><Send :size="15"/>{{publishing?'发布中':'发布'}}</button></div></header>
+  <div class="toolbar"><div><button class="btn primary" @click="openCreateChannel"><Plus :size="15"/>新增通道</button><button class="btn" :disabled="!activeChannels.length" @click="openBinding()"><Link2 :size="15"/>批量绑定设备</button></div><button class="btn" @click="historyDialog=true"><History :size="15"/>发布记录</button></div>
+  <div v-if="feedback" :class="['feedback',{error:feedbackIsError}]"><AlertTriangle v-if="feedbackIsError" :size="15"/><CheckCircle2 v-else :size="15"/>{{feedback}}</div><div v-if="issues.length" class="issues"><AlertTriangle :size="15"/><b>{{issues.length}} 项配置问题</b><span>{{issues[0]?.target}}：{{issues[0]?.message}}</span></div>
+  <div class="table-wrap"><table class="tree-table"><thead><tr><th>通道 / 设备</th><th>物理链路</th><th>站号</th><th>采集模板</th><th>状态</th><th>操作</th></tr></thead><tbody><template v-for="c in channels" :key="String(c.channelId)"><tr class="channel-row"><td><div class="entity"><button class="expand" @click="toggleChannel(c.channelId)"><ChevronDown v-if="expandedChannels.has(String(c.channelId))" :size="15"/><ChevronRight v-else :size="15"/></button><span><b>{{c.channelName||c.channelId}}</b><small>{{c.channelId}} · {{c.deviceCount||0}} 台设备</small></span></div></td><td><b>{{c.serialPort||'未选择串口'}}</b><small>{{c.baudRate}} · {{c.dataBits}}{{c.parity}}{{c.stopBits}} · RTU</small></td><td>{{((c.addresses as unknown[])||[]).join(', ')||'-'}}</td><td>{{new Set(channelDevices(c.channelId).map(d=>String(d.modelVersionId))).size}} 个模板版本</td><td><span :class="Number(c.enabled)===1?'ok':'muted'">{{Number(c.enabled)===1?'启用':'停用'}}</span></td><td><div class="row-actions"><button class="icon" title="编辑通道" @click="openEditChannel(c)"><Edit3 :size="15"/></button><button class="icon" title="绑定设备" @click="openBinding(c.channelId)"><Link2 :size="15"/></button><button class="icon danger" title="删除通道" @click="removeChannel(c)"><Trash2 :size="15"/></button></div></td></tr>
+  <tr v-for="d in (expandedChannels.has(String(c.channelId))?channelDevices(c.channelId):[])" :key="String(d.deviceId)" class="device-row"><td><div class="device-indent"><b>{{d.deviceName||d.deviceSn}}</b><small>{{d.deviceSn}}</small></div></td><td><span>继承 {{c.channelId}}</span><small>{{d.collectIntervalSeconds||c.pollIntervalSeconds}} 秒采集</small></td><td><b>{{d.modbusAddr}}</b></td><td><button class="profile" @click="openPointDialog(d.modelVersionId)"><Settings2 :size="14"/><span><b>{{d.modelName||d.profileKey||'未配置'}}</b><small>{{d.modelVersion||'-'}} · {{modelOf(d)?.pointCount||d.pointCount||0}} 点 · 共用</small></span></button></td><td><span :class="Number(d.status)===1?'ok':'muted'">{{Number(d.status)===1?'参与采集':'已停用'}}</span></td><td><div class="row-actions"><button class="icon" title="立即试采" @click="probeDevice(d)"><Activity v-if="probing===d.deviceId" :size="15"/><Play v-else :size="15"/></button><button class="icon" title="调整绑定" @click="openBinding(c.channelId)"><Edit3 :size="15"/></button><button class="icon danger" title="解绑" @click="detachDevice(d)"><Unlink :size="15"/></button></div></td></tr><tr v-if="expandedChannels.has(String(c.channelId))&&!channelDevices(c.channelId).length" class="device-row"><td colspan="6" class="empty">该通道还没有挂载设备</td></tr></template><tr v-if="!channels.length"><td colspan="6" class="empty main-empty">暂无采集通道，请先新增通道</td></tr></tbody></table></div>
+  <footer><b>配置检查</b><span>{{channels.length}} 个通道</span><span>{{devices.length}} 台设备</span><span>{{precheck.pointCount||0}} 个采集点</span><span :class="precheck.passed?'ok':'bad'">{{precheck.passed?'可以发布':'禁止发布'}}</span><span>指纹 {{shortHash(gateway.desiredChecksum)}}</span></footer></main>
+</div>
 
-    <div class="edge-summary">
-      <article><Router :size="18" /><span><b>{{ summary.gatewayCount || 0 }}</b><small>网关</small></span></article>
-      <article><GitCommitHorizontal :size="18" /><span><b>{{ summary.pendingCount || 0 }}</b><small>待同步</small></span></article>
-      <article><CheckCircle2 :size="18" /><span><b>{{ summary.appliedCount || 0 }}</b><small>已应用</small></span></article>
-      <article><AlertTriangle :size="18" /><span><b>{{ summary.issueGatewayCount || 0 }}</b><small>需处理</small></span></article>
-    </div>
+<AppDialog v-model:open="channelDialog" :title="editingChannelId?'编辑采集通道':'新增采集通道'" eyebrow="MODBUS MASTER" dialog-class="channel-dialog" :saving="saving" @submit="saveChannel"><div class="dialog-body"><section><h3>通道身份</h3><div class="form-grid"><label><span>通道编号</span><input v-model.trim="channelForm.channelId" :disabled="Boolean(editingChannelId)" placeholder="rs485-1"></label><label><span>通道名称</span><input v-model.trim="channelForm.channelName" placeholder="电表总线"></label><label><span>协议角色</span><input value="Modbus RTU 主站" disabled></label><label><span>状态</span><select v-model.number="channelForm.enabled"><option :value="1">启用</option><option :value="0">停用</option></select></label></div></section><section><h3>物理串口</h3><div class="form-grid"><label class="full"><span>网关串口</span><select v-if="portOptions.length" v-model="channelForm.serialPort"><option value="">请选择网关上报的串口</option><option v-for="p in portOptions" :key="String(p.portKey)" :value="p.systemPath">{{p.systemPath}} · {{Number(p.available??1)===1?'当前可用':'历史配置'}}</option></select><input v-else v-model.trim="channelForm.serialPort" placeholder="例如 /dev/ttyS3"><small>首次配置可填写已确认的路径，网关同步后会自动上报串口清单。</small></label><label><span>波特率</span><select v-model.number="channelForm.baudRate"><option v-for="b in [1200,2400,4800,9600,19200,38400,57600,115200]" :key="b" :value="b">{{b}}</option></select></label><label><span>数据格式</span><div class="inline"><select v-model.number="channelForm.dataBits"><option :value="8">8 位</option><option :value="7">7 位</option></select><select v-model="channelForm.parity"><option value="N">无校验</option><option value="E">偶校验</option><option value="O">奇校验</option></select><select v-model.number="channelForm.stopBits"><option :value="1">1 停止位</option><option :value="2">2 停止位</option></select></div></label></div></section><section><h3>通信策略</h3><div class="form-grid"><label><span>响应超时（毫秒）</span><input v-model.number="channelForm.timeoutMs" type="number" min="100" max="60000"></label><label><span>失败重试次数</span><input v-model.number="channelForm.retryCount" type="number" min="0" max="10"></label><label><span>默认周期（秒）</span><input v-model.number="channelForm.pollIntervalSeconds" type="number" min="5" max="86400"></label><label><span>备注</span><input v-model.trim="channelForm.remark"></label></div></section></div></AppDialog>
 
-    <div class="edge-layout">
-      <aside class="gateway-list">
-        <button v-for="item in gateways" :key="String(item.gatewayId)" :class="{ active: String(item.gatewayId) === String(selectedGatewayId) }" @click="selectGateway(item.gatewayId)">
-          <span><b>{{ item.gatewayName || item.gatewaySn }}</b><small>{{ item.gatewaySn }}</small></span>
-          <i :class="stateTone(item.applyStatus)">{{ stateLabel(item.applyStatus) }}</i>
-        </button>
-        <p v-if="!gateways.length" class="center-empty">暂无网关。</p>
-      </aside>
+<AppDialog v-model:open="bindingDialog" title="绑定组织设备" eyebrow="DEVICE BINDING" hide-actions dialog-class="wide-dialog"><div class="wide-body"><div class="dialog-toolbar"><input v-model.trim="bindingKeyword" placeholder="搜索设备编号或名称" @keyup.enter="loadBindingDevices"><select v-model="bindingStatusFilter"><option value="unbound">只看未接入</option><option value="current">当前网关设备</option><option value="all">全部候选</option></select><select v-model="bindingModelFilter"><option value="">全部模板</option><option v-for="m in bindingModelOptions" :key="m.value" :value="m.value">{{m.label}}</option></select><button class="btn" @click="loadBindingDevices"><RefreshCw :size="14"/>{{bindingLoading?'查询中':'查询'}}</button></div><div class="dialog-table"><table><thead><tr><th>组织设备</th><th>当前归属</th><th>共用模板</th><th>目标通道</th><th>从站地址</th><th>周期</th><th></th></tr></thead><tbody><tr v-for="r in filteredBindingRows" :key="String(r.device.deviceId)" :class="{invalid:bindingInvalid(r)}"><td><b>{{r.device.deviceName||r.device.deviceSn}}</b><small>{{r.device.deviceSn}} · {{r.device.orgName||'-'}}</small></td><td>{{r.device.gatewayName||'未绑定'}}</td><td><b>{{r.device.modelName||r.device.profileKey||'未配置'}}</b><small>{{r.device.modelVersion||'-'}}</small></td><td><select :value="r.draft.channelId" @change="applyBindingChannel(r.device.deviceId, ($event.target as HTMLSelectElement).value)"><option v-for="c in activeChannels" :key="String(c.channelId)" :value="c.channelId">{{c.channelName||c.channelId}}</option></select></td><td><input v-model.number="r.draft.modbusAddr" type="number" min="1" max="247"><small v-if="usedAddresses(r.draft.channelId,r.device.deviceId).has(Number(r.draft.modbusAddr))">该通道地址已占用</small></td><td><input v-model.number="r.draft.collectIntervalSeconds" type="number" min="5"></td><td><button class="btn primary" :disabled="saving||bindingInvalid(r)" @click="saveBinding(r.device)">保存绑定</button></td></tr><tr v-if="!bindingLoading&&!filteredBindingRows.length"><td colspan="7" class="empty main-empty">没有匹配设备</td></tr></tbody></table></div></div></AppDialog>
 
-      <main class="edge-panel">
-        <section class="gateway-strip">
-          <div><small>当前网关</small><b>{{ gateway.gatewayName || gateway.gatewaySn || '-' }}</b></div>
-          <div><small>配置状态</small><b :class="stateTone(syncState)">{{ stateLabel(syncState) }}</b></div>
-          <div><small>期望版本</small><b>{{ gateway.desiredRevision || '-' }}</b></div>
-          <div><small>已应用版本</small><b>{{ gateway.appliedRevision || '-' }}</b></div>
-          <div><small>指纹</small><b>{{ checksumMatched ? '一致' : shortHash(gateway.desiredChecksum) }}</b></div>
-          <div><small>同步时间</small><b>{{ fmt(gateway.lastSyncTime) }}</b></div>
-        </section>
+<AppDialog v-model:open="pointDialog" title="已发布采集计划" eyebrow="COMPILED PROFILE" hide-actions dialog-class="wide-dialog"><div class="wide-body"><div class="warning"><AlertTriangle :size="16"/>这里展示产品与协议中心编译后的只读计划。协议地址和倍率请在协议中心维护，业务名称、单位和显示倍率请在产品目录维护。</div><div class="dialog-toolbar"><select v-model="selectedModelId"><option v-for="m in models" :key="String(m.modelVersionId)" :value="m.modelVersionId">{{m.modelName||m.profileKey}} · {{m.modelVersion}} · {{m.pointCount||0}} 点</option></select></div><div class="dialog-table points"><table><thead><tr><th>标准测点</th><th>名称</th><th>协议字段</th><th>厂家地址</th><th>实际请求</th><th>类型</th><th>位</th><th>解码倍率</th><th>展示倍率</th></tr></thead><tbody><tr v-for="p in ((selectedModel?.points as RecordRow[])||[])" :key="String(p.id)"><td><b>{{p.pointCode}}</b></td><td>{{p.pointName}}</td><td>{{p.fieldName||p.fieldCode}}</td><td>{{p.documentAddress||'-'}}</td><td>FC{{p.functionCode}} · {{p.registerAddress}} × {{p.registerLength}}</td><td>{{p.valueType}} · {{p.byteOrder}}</td><td>{{p.bitOffset??'-'}}</td><td>{{p.decodeFactor??1}} × {{p.canonicalFactor??1}}</td><td>{{p.displayFactor??1}} {{p.displayUnit||p.unit||''}}</td></tr></tbody></table></div></div></AppDialog>
 
-        <section class="precheck-band" :class="{ passed: precheck.passed, failed: precheck.passed === false }">
-          <ShieldCheck :size="18" />
-          <span><b>{{ precheck.passed ? '发布前检查通过' : '发布前检查未通过' }}</b><small>{{ precheck.deviceCount || 0 }} 台设备，{{ precheck.pointCount || 0 }} 个采集点</small></span>
-        </section>
-
-        <section v-if="issues.length" class="issue-list">
-          <article v-for="issue in issues" :key="`${issue.target}-${issue.message}`">
-            <AlertTriangle :size="15" />
-            <span><b>{{ issue.target }}</b><small>{{ issue.message }}</small></span>
-          </article>
-        </section>
-
-        <section class="edge-section">
-          <h2>RS485 通道</h2>
-          <div class="channel-grid">
-            <article v-for="channel in channels" :key="String(channel.channelId)">
-              <b>{{ channel.channelId }}</b>
-              <small>{{ channel.deviceCount }} 台设备</small>
-              <p>从站地址：{{ (channel.addresses as unknown[] || []).join(', ') || '未配置' }}</p>
-            </article>
-          </div>
-        </section>
-
-        <section class="edge-section">
-          <h2>从站绑定</h2>
-          <div class="table-wrap edge-table">
-            <table>
-              <thead><tr><th>设备</th><th>通道</th><th>从站地址</th><th>周期</th><th>模型</th><th>操作</th></tr></thead>
-              <tbody>
-                <tr v-for="row in deviceRows" :key="String(row.device.deviceId)">
-                  <td><b>{{ row.device.deviceName || row.device.deviceSn }}</b><small>{{ row.device.deviceSn }}</small></td>
-                  <td><input v-model="row.draft.channelId" /></td>
-                  <td><input v-model.number="row.draft.modbusAddr" type="number" min="1" max="247" /></td>
-                  <td><input v-model.number="row.draft.collectIntervalSeconds" type="number" min="5" max="86400" /></td>
-                  <td>{{ row.device.profileKey || '-' }} · {{ row.device.modelVersion || '-' }}</td>
-                  <td class="row-actions">
-                    <button class="row-action" :disabled="saving" @click="saveDevice(row.device)"><Save :size="14" />保存</button>
-                    <button class="row-action primary-lite" :disabled="probing === row.device.deviceId" @click="probeDevice(row.device)">试采</button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="edge-section model-editor">
-          <header>
-            <h2>模型点表</h2>
-            <div>
-              <select v-model="selectedModelId" @change="loadPointDrafts">
-                <option v-for="model in models" :key="String(model.modelVersionId)" :value="model.modelVersionId">
-                  {{ model.modelName || model.profileKey }} · {{ model.modelVersion }}
-                </option>
-              </select>
-              <button class="row-action" @click="addPoint"><Plus :size="14" />新增点</button>
-              <button class="row-action primary-lite" :disabled="saving || !selectedModel" @click="savePoints"><Save :size="14" />保存点表</button>
-            </div>
-          </header>
-          <div class="table-wrap edge-table point-table">
-            <table>
-              <thead><tr><th>点位</th><th>名称</th><th>平台点位</th><th>功能码</th><th>地址</th><th>长度</th><th>类型</th><th>字节序</th><th>比例</th><th></th></tr></thead>
-              <tbody>
-                <tr v-for="(point, index) in pointDrafts" :key="`${point.pointCode}-${index}`">
-                  <td><input v-model="point.pointCode" /></td>
-                  <td><input v-model="point.pointName" /></td>
-                  <td><input v-model="point.standardPointCode" /></td>
-                  <td><select v-model.number="point.functionCode"><option :value="3">03</option><option :value="4">04</option></select></td>
-                  <td><input v-model.number="point.registerAddress" type="number" min="0" /></td>
-                  <td><input v-model.number="point.registerLength" type="number" min="1" max="2" /></td>
-                  <td><select v-model="point.valueType"><option>u16</option><option>i16</option><option>u32</option><option>i32</option><option>f32</option></select></td>
-                  <td><select v-model="point.byteOrder"><option>AB</option><option>BA</option><option>ABCD</option><option>BADC</option><option>CDAB</option><option>DCBA</option></select></td>
-                  <td><input v-model.number="point.scaleFactor" type="number" step="0.000001" /></td>
-                  <td><button class="icon-btn danger" title="删除点位" @click="removePoint(index)"><Trash2 :size="14" /></button></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="edge-section two-col">
-          <div>
-            <h2>应用明细</h2>
-            <article v-for="item in resources" :key="`${item.resourceType}-${item.resourceKey}`" class="timeline-row">
-              <b>{{ item.resourceType }} · {{ item.resourceKey }}</b>
-              <small>{{ stateLabel(item.applyStatus) }} · {{ shortHash(item.configChecksum) }} · {{ fmt(item.appliedTime || item.updateTime) }}</small>
-            </article>
-            <p v-if="!resources.length" class="center-empty">暂无应用明细。</p>
-          </div>
-          <div>
-            <h2>配置记录</h2>
-            <article v-for="item in audit" :key="`${item.actionType}-${item.createTime}`" class="timeline-row">
-              <b>{{ item.actionType }}</b>
-              <small>{{ item.operatorName || 'system' }} · {{ fmt(item.createTime) }}</small>
-            </article>
-            <p v-if="!audit.length" class="center-empty">暂无配置记录。</p>
-          </div>
-        </section>
-      </main>
-    </div>
-  </section>
+<AppDialog v-model:open="historyDialog" title="配置发布与应用记录" eyebrow="RELEASE HISTORY" hide-actions dialog-class="wide-dialog"><div class="wide-body history"><section><h3>发布版本</h3><div class="dialog-table"><table><thead><tr><th>版本</th><th>状态</th><th>发布人</th><th>发布时间</th><th>应用时间</th><th>错误</th></tr></thead><tbody><tr v-for="r in releases" :key="String(r.id)"><td><b>{{r.revision}}</b><small>{{shortHash(r.checksum)}}</small></td><td :class="stateTone(r.releaseStatus)">{{stateLabel(r.releaseStatus)}}</td><td>{{r.publishedBy||'-'}}</td><td>{{r.publishTime||'-'}}</td><td>{{r.appliedTime||'-'}}</td><td>{{r.errorMessage||'-'}}</td></tr></tbody></table></div></section><section><h3>资源应用结果</h3><div class="dialog-table"><table><thead><tr><th>类型</th><th>资源</th><th>版本</th><th>状态</th><th>信息</th></tr></thead><tbody><tr v-for="r in resources" :key="`${r.resourceType}-${r.resourceKey}`"><td>{{r.resourceType}}</td><td>{{r.resourceKey}}</td><td>{{r.configRevision||'-'}}</td><td :class="stateTone(r.applyStatus)">{{stateLabel(r.applyStatus)}}</td><td>{{r.errorMessage||'-'}}</td></tr></tbody></table></div></section></div></AppDialog>
+</section>
 </template>
 
 <style scoped>
-.edge-config-page { min-height: 100%; }
-.edge-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
-.edge-summary article { min-width: 0; min-height: 74px; display: flex; align-items: center; gap: 12px; padding: 13px 14px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
-.edge-summary svg { color: var(--accent); }
-.edge-summary span { display: grid; gap: 2px; }
-.edge-summary b { font-size: 22px; color: var(--fg); }
-.edge-summary small, .gateway-strip small, .precheck-band small, .issue-list small, td small, .channel-grid small, .timeline-row small { color: var(--muted); font-size: 12px; }
-.edge-layout { min-height: 620px; display: grid; grid-template-columns: 278px minmax(0, 1fr); gap: 12px; }
-.gateway-list { min-height: 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: #fff; overflow: auto; }
-.gateway-list button { width: 100%; min-height: 66px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border: 0; border-radius: 6px; background: transparent; text-align: left; }
-.gateway-list button:hover, .gateway-list button.active { background: #eef6ff; }
-.gateway-list span, td { min-width: 0; }
-.gateway-list b, td b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.gateway-list i { flex: none; padding: 4px 7px; border-radius: 999px; font-size: 11px; font-style: normal; background: #edf2f7; color: #64748b; }
-.gateway-list i.ok, .gateway-strip .ok { color: #15803d; }
-.gateway-list i.warn, .gateway-strip .warn { color: #b45309; }
-.gateway-list i.bad, .gateway-strip .bad { color: #dc2626; }
-.edge-panel { min-width: 0; display: grid; gap: 12px; align-content: start; }
-.gateway-strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; border: 1px solid var(--border); border-radius: 8px; background: #fff; overflow: hidden; }
-.gateway-strip div { min-width: 0; padding: 12px; border-right: 1px solid var(--border); }
-.gateway-strip div:last-child { border-right: 0; }
-.gateway-strip b { display: block; margin-top: 5px; overflow: hidden; color: #203248; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.precheck-band { min-height: 56px; display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 8px; border: 1px solid #e2e8f0; background: #f8fafc; }
-.precheck-band.passed { border-color: #bbf7d0; background: #f0fdf4; color: #166534; }
-.precheck-band.failed { border-color: #fecaca; background: #fff5f5; color: #b91c1c; }
-.precheck-band span { display: grid; gap: 2px; }
-.issue-list { display: grid; gap: 8px; }
-.issue-list article { display: flex; gap: 9px; padding: 10px 12px; border: 1px solid #fed7aa; border-radius: 7px; background: #fff7ed; color: #9a3412; }
-.issue-list span { min-width: 0; display: grid; gap: 2px; }
-.edge-section { min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
-.edge-section h2 { margin: 0 0 12px; font-size: 15px; }
-.channel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
-.channel-grid article { min-width: 0; padding: 12px; border: 1px solid #e5edf5; border-radius: 7px; background: #f8fbff; }
-.channel-grid b { display: block; color: #203248; }
-.channel-grid p { margin: 8px 0 0; color: #516173; font-size: 12px; }
-.edge-table { max-height: 420px; overflow: auto; }
-.edge-table table { width: 100%; border-collapse: collapse; min-width: 760px; }
-.edge-table th, .edge-table td { padding: 8px; border-bottom: 1px solid var(--border); text-align: left; font-size: 12px; }
-.edge-table th { position: sticky; top: 0; background: #f8fbff; color: #526173; font-weight: 700; }
-input, select { width: 100%; min-height: 32px; border: 1px solid #d6e0eb; border-radius: 6px; padding: 5px 8px; background: #fff; color: #203248; }
-.row-action { min-height: 32px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 0 9px; background: #fff; color: #203248; white-space: nowrap; }
-.row-action.primary-lite { border-color: #93c5fd; background: #eff6ff; color: #1d4ed8; }
-.row-actions { display: flex; gap: 6px; }
-.model-editor header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-.model-editor header h2 { margin: 0; }
-.model-editor header div { display: flex; align-items: center; gap: 8px; }
-.point-table table { min-width: 1120px; }
-.two-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.timeline-row { padding: 9px 0; border-bottom: 1px solid var(--border); }
-.timeline-row b, .timeline-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 980px) {
-  .edge-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .edge-layout, .two-col { grid-template-columns: 1fr; }
-  .gateway-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .model-editor header, .model-editor header div { align-items: stretch; flex-direction: column; }
-}
+.edge-page{height:100%;min-height:0;padding:0;overflow:hidden;background:#f4f7fa}.edge-shell{height:100%;display:grid;grid-template-columns:320px minmax(0,1fr)}.gateway-pane{min-height:0;display:flex;flex-direction:column;border-right:1px solid var(--border);background:#fff}.pane-title{height:50px;display:flex;align-items:center;gap:8px;padding:0 14px;border-bottom:1px solid var(--border)}.gateway-scroll{overflow:auto;padding:8px}.gateway-row{width:100%;min-height:58px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px;border:0;border-left:3px solid transparent;background:transparent;text-align:left}.gateway-row:hover,.gateway-row.active{background:#edf5fd}.gateway-row.active{border-left-color:#1671c5}.gateway-row>span{min-width:0}.gateway-row b,.gateway-row small,td small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gateway-row small,td small{margin-top:3px;color:var(--muted);font-size:10px}.gateway-row i{font-size:10px;font-style:normal}.workbench{min-width:0;min-height:0;display:flex;flex-direction:column;background:#fff}.titlebar{min-height:70px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 16px;border-bottom:1px solid var(--border)}.titlebar h1{margin:0;font-size:18px;letter-spacing:0}.titlebar p{margin:4px 0 0;color:var(--muted);font-size:11px}.release-summary,.toolbar,.toolbar>div,.row-actions,.dialog-toolbar,.inline{display:flex;align-items:center;gap:7px}.release-summary>span{display:grid;text-align:right}.release-summary small{color:var(--muted);font-size:10px}.toolbar{min-height:48px;justify-content:space-between;padding:7px 16px;border-bottom:1px solid var(--border);background:#fbfcfe}.btn{min-height:32px;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:0 10px;border:1px solid #cbd8e5;border-radius:5px;background:#fff;color:#29445f;font-size:11px}.btn.primary{border-color:#176fc1;background:#176fc1;color:#fff}.btn:disabled,.icon:disabled{opacity:.45}.feedback,.issues{min-height:36px;display:flex;align-items:center;gap:7px;padding:6px 16px;border-bottom:1px solid;font-size:11px}.feedback{border-color:#bde6cc;background:#f1fbf5;color:#17643d}.feedback.error{border-color:#efc3c3;background:#fff4f4;color:#a12f2f}.issues{border-color:#f3d3a4;background:#fff9ef;color:#8a570f}.table-wrap{flex:1;min-height:0;overflow:auto}.tree-table{width:100%;min-width:900px;border-collapse:collapse}.tree-table th,.tree-table td{height:48px;padding:7px 11px;border-bottom:1px solid var(--border);text-align:left;font-size:11px}.tree-table th{position:sticky;top:0;z-index:3;height:36px;background:#f5f8fb;color:#597086}.tree-table th:first-child{width:28%}.tree-table th:last-child{width:112px;text-align:right}.channel-row td{height:58px;background:#fff}.device-row td{height:52px;background:#f8fafc}.entity{display:flex;align-items:center;gap:7px}.expand{width:26px;height:26px;display:grid;place-items:center;border:0;background:transparent}.device-indent{position:relative;padding-left:34px}.device-indent:before{content:'';position:absolute;left:15px;top:-18px;bottom:50%;width:12px;border-left:1px solid #cbd7e3;border-bottom:1px solid #cbd7e3}.profile{display:flex;align-items:center;gap:7px;max-width:260px;padding:0;border:0;background:transparent;color:#176fc1;text-align:left}.profile>span{min-width:0}.row-actions{justify-content:flex-end}.icon{width:29px;height:29px;display:grid;place-items:center;border:1px solid #cbd8e5;border-radius:5px;background:#fff;color:#385570}.danger{color:#b84747}.ok{color:#17804f}.warn{color:#a6630b}.bad{color:#c13e3e}.muted{color:#758598}.empty{text-align:center!important;color:var(--muted)}.main-empty{height:120px!important}footer{min-height:40px;display:flex;align-items:center;gap:18px;padding:7px 16px;border-top:1px solid var(--border);color:#60758b;font-size:10px;white-space:nowrap;overflow:auto}.dialog-body,.wide-body{padding:14px 20px 20px}.dialog-body section+section{margin-top:14px;padding-top:13px;border-top:1px solid var(--border)}h3{margin:0 0 9px;font-size:12px;letter-spacing:0}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 14px}.form-grid label{display:grid;gap:5px;color:#60758b;font-size:10px}.form-grid .full{grid-column:1/-1}input,select{box-sizing:border-box;width:100%;min-height:34px;border:1px solid #cedae6;border-radius:5px;padding:5px 8px;background:#fff;color:#263b53;font-size:11px}.dialog-toolbar{margin-bottom:10px}.dialog-toolbar>input{flex:1}.dialog-toolbar>select{max-width:480px}.dialog-table{min-height:0;overflow:auto;border:1px solid var(--border)}.dialog-table table{width:100%;min-width:900px;border-collapse:collapse}.dialog-table th,.dialog-table td{height:42px;padding:7px 8px;border-bottom:1px solid var(--border);text-align:left;font-size:10px}.dialog-table th{position:sticky;top:0;background:#f5f8fb}.points table{min-width:1120px}.warning{min-height:38px;display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:7px;border-left:3px solid #d9952a;background:#fff8e9;color:#805512;font-size:10px}.wide-body{height:100%;min-height:0;display:flex;flex-direction:column}.wide-body>.dialog-table{flex:1}.history{display:grid;grid-template-rows:1fr 1fr;gap:12px}.history section{min-height:0;display:flex;flex-direction:column}.history .dialog-table{flex:1}.edge-page :deep(.channel-dialog){width:min(780px,calc(100vw - 32px))}.edge-page :deep(.wide-dialog){width:min(1240px,calc(100vw - 32px));height:min(820px,calc(100vh - 24px));max-height:none}.edge-page :deep(.wide-dialog .dialog-content){min-height:0;display:flex;flex-direction:column;overflow:hidden}.edge-page :deep(.wide-dialog .dialog-content>*){flex:1;min-height:0;display:flex;flex-direction:column}
+@media(max-width:900px){.edge-shell{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}.gateway-pane{border-right:0;border-bottom:1px solid var(--border)}.pane-title{height:38px}.gateway-scroll{display:flex}.gateway-row{min-width:190px}.release-summary>span{display:none}}
+@media(max-width:620px){.titlebar{align-items:stretch;flex-direction:column}.release-summary .btn{flex:1}.toolbar{align-items:stretch;flex-direction:column}.toolbar>div .btn{flex:1}.form-grid{grid-template-columns:1fr}.form-grid .full{grid-column:auto}.dialog-body,.wide-body{padding:10px}}
+.dialog-table tr.invalid td{background:#fff7f7}.dialog-table td small{color:#b84747}
 </style>
