@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ArrowLeft, BadgeCheck, ChevronRight, CopyPlus, ImagePlus, Plus, RefreshCw, Save, Search, Trash2, X } from '@lucide/vue'
 import AppDialog from '@/components/app/AppDialog.vue'
 import AppConfirmDialog from '@/components/app/AppConfirmDialog.vue'
 import AppImage from '@/components/app/AppImage.vue'
 import CatalogTreeNode from '@/components/catalog/CatalogTreeNode.vue'
 import DictionarySelectTree from '@/components/catalog/DictionarySelectTree.vue'
-import { catalogAttributeTree, catalogClearModelImage, catalogCreate, catalogCreateVersion, catalogDeleteNode, catalogDeleteVersion, catalogLookups, catalogModel, catalogPointTree, catalogSaveAttributes, catalogSavePoints, catalogTree, catalogUpdateNode, catalogUpdateVersion, catalogUploadModelImage, catalogVersionAction } from '@/api/platform'
+import { catalogApplyProtocolTemplate, catalogAttributeTree, catalogClearModelImage, catalogCreate, catalogCreateVersion, catalogDeleteNode, catalogDeleteVersion, catalogLookups, catalogModel, catalogPointTree, catalogSaveAttributes, catalogSavePoints, catalogTree, catalogUpdateNode, catalogUpdateVersion, catalogUploadModelImage, catalogVersionAction, protocolVersion, publishedProtocolVersions } from '@/api/platform'
 import { useSessionStore } from '@/stores/session'
 import type { RecordRow } from '@/types/domain'
 
@@ -50,7 +50,11 @@ const versionDeleteTarget = ref<RecordRow | null>(null)
 const createParentLocked = ref(false)
 const modelImagePreview = ref('')
 const modelImageSaving = ref(false)
-const versionForm = reactive({ collectIntervalSeconds: 300, qualityThresholdPct: 80, protocolType: 'JSON', remark: '' })
+const versionForm = reactive({ collectIntervalSeconds: 300, qualityThresholdPct: 80, protocolProfileVersionId: '' as unknown, remark: '' })
+const protocolOptions = ref<RecordRow[]>([])
+const protocolFields = ref<RecordRow[]>([])
+const bindingProfileKey = ref('')
+const bindingVersionId = ref('')
 const attributeDrafts = ref<RecordRow[]>([])
 const pointDrafts = ref<RecordRow[]>([])
 const templateAttributeKeyword = ref('')
@@ -75,6 +79,7 @@ const productHierarchy = computed(() => filterTreeNodes(trimProductTree(nodeChil
 const model = computed(() => detail.value.model as RecordRow || {})
 const version = computed(() => detail.value.version as RecordRow || {})
 const versions = computed(() => Array.isArray(detail.value.versions) ? detail.value.versions as RecordRow[] : [])
+const visibleVersions = computed(() => versions.value.filter((item) => item.protocol_profile_version_id || item.protocolProfileVersionId))
 const devices = computed(() => Array.isArray(detail.value.devices) ? detail.value.devices as RecordRow[] : [])
 const templateAttributeGroupOptions = computed(() => [...new Set(attributeDrafts.value.map((item) => String(item.group_name || '未分组属性')))])
 const templatePointGroupOptions = computed(() => [...new Set(pointDrafts.value.map((item) => String(item.point_group_name || '未分组测点')))])
@@ -98,7 +103,7 @@ const attributeBindingGroups = computed(() => {
 const filteredPointDrafts = computed(() => {
   const query = templatePointKeyword.value.trim().toLowerCase()
   return pointDrafts.value.filter((item) => {
-    const text = [item.point_name, item.point_code, item.point_group_name, item.mapping_protocol_type, item.source_path, item.register_address].filter(Boolean).join(' ').toLowerCase()
+    const text = [item.point_name, item.point_code, item.point_group_name, item.field_name, item.field_code].filter(Boolean).join(' ').toLowerCase()
     return (!query || text.includes(query)) && (!templatePointGroupFilter.value || String(item.point_group_name || '未分组测点') === templatePointGroupFilter.value)
   })
 })
@@ -113,7 +118,7 @@ const realtimePointGroups = computed(() => {
 const filteredReferencedDevices = computed(() => {
   const query = referencedDeviceKeyword.value.trim().toLowerCase()
   return devices.value.filter((item) => {
-    const text = [item.device_sn, item.device_name, item.org_name, item.gateway_name, item.gateway_sn].filter(Boolean).join(' ').toLowerCase()
+    const text = [item.device_sn, item.device_name, item.org_name, item.gateway_name, item.gateway_sn, item.channel_name, item.edge_channel_id, item.protocol_addr].filter(Boolean).join(' ').toLowerCase()
     return (!query || text.includes(query))
       && (!referencedDeviceOrgFilter.value || String(item.org_name || '未分配组织') === referencedDeviceOrgFilter.value)
       && (!referencedDeviceStatusFilter.value || String(item.status || '—') === referencedDeviceStatusFilter.value)
@@ -122,6 +127,19 @@ const filteredReferencedDevices = computed(() => {
 const isModel = computed(() => ['MODEL', 'VERSION'].includes(String(selected.value?.nodeType)))
 const isDraft = computed(() => String(version.value.status) === 'DRAFT')
 const isDisabledVersion = computed(() => String(version.value.status) === 'DISABLED')
+const protocolBound = computed(() => Boolean(versionForm.protocolProfileVersionId))
+const selectedProtocolOption = computed(() => protocolOptions.value.find((item) => String(item.id) === String(versionForm.protocolProfileVersionId)) || null)
+const protocolProfileOptions = computed(() => {
+  const seen = new Set<string>()
+  return protocolOptions.value.reduce<RecordRow[]>((result, item) => {
+    const key = protocolProfileKey(item)
+    if (!key || seen.has(key)) return result
+    seen.add(key)
+    result.push(item)
+    return result
+  }, [])
+})
+const bindingVersionOptions = computed(() => protocolOptions.value.filter((item) => protocolProfileKey(item) === bindingProfileKey.value))
 const canPublishVersion = computed(() => ['DRAFT', 'DISABLED'].includes(String(version.value.status)))
 const canDeleteVersion = computed(() => canRemoveVersion(version.value))
 const canAdd = computed(() => session.can('catalog:edit') || session.can('catalog:attribute:manage') || session.can('archive:add'))
@@ -156,6 +174,7 @@ const createTitle = computed(() => {
 
 function camel(row: RecordRow, camelKey: string, snakeKey: string) { return row[camelKey] ?? row[snakeKey] }
 function statusLabel(value: unknown) { return ({ DRAFT: '草稿', PUBLISHED: '已发布', DISABLED: '已停用' } as Record<string, string>)[String(value)] || String(value || '—') }
+function protocolProfileKey(item: RecordRow) { return String(item.profile_id || item.profileId || item.profile_code || '') }
 function nodeChildren(node: RecordRow): RecordRow[] { return Array.isArray(node.children) ? node.children as RecordRow[] : [] }
 function validationKey(value: unknown = version.value.id) { return String(value || '') }
 function clearValidationCache(value: unknown = version.value.id) {
@@ -200,6 +219,40 @@ function findParent(nodes: RecordRow[], target: RecordRow, parent: RecordRow | n
 }
 function canRemoveVersion(row: RecordRow) {
   return ['DRAFT', 'DISABLED'].includes(String(row.status)) && Number(row.reference_count || 0) === 0
+}
+
+function setDetailTab(next: DetailTab) {
+  if (next !== 'basic' && !protocolBound.value) {
+    tab.value = 'basic'
+    error.value = '请先在基本信息里绑定厂家协议模板'
+    return
+  }
+  tab.value = next
+}
+
+function syncBindingSelection() {
+  const current = selectedProtocolOption.value
+  if (current) {
+    bindingProfileKey.value = protocolProfileKey(current)
+    bindingVersionId.value = String(current.id || '')
+    return
+  }
+  if (!protocolOptions.value.length) {
+    bindingProfileKey.value = ''
+    bindingVersionId.value = ''
+    return
+  }
+  if (!bindingProfileKey.value || !protocolOptions.value.some((item) => protocolProfileKey(item) === bindingProfileKey.value)) {
+    const firstOption = protocolOptions.value[0]
+    bindingProfileKey.value = firstOption ? protocolProfileKey(firstOption) : ''
+  }
+  if (!bindingVersionOptions.value.some((item) => String(item.id) === String(bindingVersionId.value))) {
+    bindingVersionId.value = String(bindingVersionOptions.value[0]?.id || '')
+  }
+}
+
+function onBindingProfileChange() {
+  bindingVersionId.value = String(bindingVersionOptions.value[0]?.id || '')
 }
 
 async function loadAll(keepSelection = true) {
@@ -338,6 +391,7 @@ async function loadModel(modelId: unknown, versionId?: unknown) {
   try {
     detail.value = await catalogModel(modelId, versionId)
     syncDrafts()
+    await loadProtocolFields()
   } catch (e) { error.value = e instanceof Error ? e.message : '型号详情读取失败' }
   finally { loading.value = false }
 }
@@ -353,14 +407,13 @@ function syncDrafts() {
   Object.assign(versionForm, {
     collectIntervalSeconds: Number(camel(version.value, 'collectIntervalSeconds', 'collect_interval_seconds') || 300),
     qualityThresholdPct: Number(camel(version.value, 'qualityThresholdPct', 'quality_threshold_pct') || 80),
-    protocolType: String(camel(version.value, 'protocolType', 'protocol_type') || 'JSON') === 'MODBUS' ? 'MODBUS_RTU' : String(camel(version.value, 'protocolType', 'protocol_type') || 'JSON'),
+    protocolProfileVersionId: camel(version.value, 'protocolProfileVersionId', 'protocol_profile_version_id') || '',
     remark: String(version.value.remark || ''),
   })
+  syncBindingSelection()
+  if (!protocolBound.value && tab.value !== 'basic') tab.value = 'basic'
   attributeDrafts.value = (Array.isArray(detail.value.attributes) ? detail.value.attributes as RecordRow[] : []).map((item) => ({ ...item }))
-  pointDrafts.value = (Array.isArray(detail.value.points) ? detail.value.points as RecordRow[] : []).map((item) => ({
-    ...item,
-    mapping_protocol_type: String(item.mapping_protocol_type || versionForm.protocolType) === 'MODBUS' ? 'MODBUS_RTU' : String(item.mapping_protocol_type || versionForm.protocolType),
-  }))
+  pointDrafts.value = (Array.isArray(detail.value.points) ? detail.value.points as RecordRow[] : []).map((item) => ({ ...item }))
   selectedAttributeIds.value = []
   selectedPointIds.value = []
 }
@@ -394,6 +447,7 @@ function openCreate(kind: CreateKind, editNode: RecordRow | null = null, default
       modelCode: edit?.model_code || edit?.code || '',
       modelName: edit?.model_name || edit?.label || '',
       protocolType: edit?.protocol_type || 'JSON',
+      protocolProfileVersionId: '',
       description: edit?.description || '',
       imageObjectKey: edit?.image_object_key || detailModel.image_object_key || '',
     })
@@ -548,34 +602,66 @@ function removePoint(index: number) {
   pointDrafts.value.splice(index, 1)
 }
 
-function isModbusPoint(item: RecordRow) {
-  return String(item.mapping_protocol_type || '').startsWith('MODBUS')
-}
-
 function addPoint() {
-  const modbus = versionForm.protocolType.startsWith('MODBUS')
-  pointDrafts.value.push({ point_code: '', point_name: '', data_type: 'DOUBLE', unit: '', business_role: 'INSTANT_VALUE', billable: 0, stat_enabled: 1, enabled: 1, mapping_protocol_type: versionForm.protocolType, source_path: modbus ? '' : '$.', function_code: modbus ? '03' : '', register_address: '', register_length: modbus ? 2 : '', value_type: modbus ? 'FLOAT32' : '', byte_order: modbus ? 'ABCD' : '', scale_factor: 1, offset_value: 0, required: 1 })
+  pointDrafts.value.push({ point_code: '', point_name: '', data_type: 'DOUBLE', unit: '', business_role: 'INSTANT_VALUE', billable: 0, stat_enabled: 1, enabled: 1, protocol_field_id: '', canonical_factor: 1, canonical_offset: 0, display_factor: 1, display_unit: '', required: 1 })
 }
 
-function syncPointProtocol() {
-  const modbus = versionForm.protocolType.startsWith('MODBUS')
-  pointDrafts.value.forEach((item) => {
-    item.mapping_protocol_type = versionForm.protocolType
-    if (modbus) {
-      item.source_path = ''
-      item.function_code ||= '03'
-      item.register_length ||= 2
-      item.value_type ||= 'FLOAT32'
-      item.byte_order ||= 'ABCD'
-    } else {
-      item.source_path ||= `$.${item.point_code || ''}`
-      item.function_code = ''
-      item.register_address = ''
-      item.register_length = ''
-      item.value_type = ''
-      item.byte_order = ''
-    }
-  })
+async function loadProtocolFields() {
+  protocolFields.value = []
+  if (!versionForm.protocolProfileVersionId) return
+  const data = await protocolVersion(versionForm.protocolProfileVersionId)
+  protocolFields.value = data.fields as RecordRow[] || []
+}
+
+async function confirmProtocolBinding() {
+  if (protocolBound.value) return
+  if (!bindingVersionId.value) {
+    error.value = '请选择协议版本'
+    return
+  }
+  saving.value = true
+  error.value = ''
+  try {
+    detail.value = await catalogUpdateVersion(version.value.id, {
+      collectIntervalSeconds: versionForm.collectIntervalSeconds,
+      qualityThresholdPct: versionForm.qualityThresholdPct,
+      protocolProfileVersionId: bindingVersionId.value,
+      remark: versionForm.remark,
+    })
+    clearValidationCache()
+    syncDrafts()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '版本配置保存失败'
+    saving.value = false
+    return
+  }
+  saving.value = false
+  const applied = await applySelectedProtocolTemplate(null)
+  if (!applied) return
+  await publishVersion()
+  tab.value = 'basic'
+}
+
+async function applySelectedProtocolTemplate(nextTab: DetailTab | null = 'points') {
+  if (!version.value.id || !versionForm.protocolProfileVersionId) {
+    error.value = '请先选择协议模板'
+    return false
+  }
+  saving.value = true
+  error.value = ''
+  try {
+    detail.value = await catalogApplyProtocolTemplate(version.value.id, versionForm.protocolProfileVersionId)
+    clearValidationCache()
+    syncDrafts()
+    await loadProtocolFields()
+    if (nextTab) tab.value = nextTab
+    return true
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '协议模板应用失败'
+    return false
+  } finally {
+    saving.value = false
+  }
 }
 
 function createPointFromAttribute(item: RecordRow) {
@@ -590,9 +676,7 @@ function createPointFromAttribute(item: RecordRow) {
     point_code: code, point_name: String(item.attribute_name || code),
     data_type: sourceType === 'NUMBER' ? 'DOUBLE' : sourceType === 'BOOLEAN' ? 'BOOLEAN' : 'STRING',
     unit: String(item.unit || ''), business_role: 'INSTANT_VALUE', billable: 0, stat_enabled: 1, enabled: 1,
-    mapping_protocol_type: versionForm.protocolType, source_path: versionForm.protocolType === 'JSON' ? `$.${code}` : '',
-    function_code: versionForm.protocolType === 'JSON' ? '' : '03', register_address: '', register_length: versionForm.protocolType === 'JSON' ? '' : 2,
-    value_type: versionForm.protocolType === 'JSON' ? '' : 'FLOAT32', byte_order: versionForm.protocolType === 'JSON' ? '' : 'ABCD', scale_factor: 1, offset_value: 0, required: 1,
+    protocol_field_id: '', canonical_factor: 1, canonical_offset: 0, display_factor: 1, display_unit: String(item.unit || ''), required: 1,
   })
   tab.value = 'points'
 }
@@ -603,9 +687,7 @@ function addStandardPoint() {
     standard_point_id: item.id,
     point_code: item.point_code, point_name: item.point_name, data_type: item.data_type || 'DOUBLE', unit: item.unit || '',
     business_role: item.business_role || 'INSTANT_VALUE', billable: 0, stat_enabled: 1, enabled: 1,
-    mapping_protocol_type: versionForm.protocolType, source_path: versionForm.protocolType === 'JSON' ? `$.realtime.${String(item.point_code || '').replace(/_([a-z])/g, (_, c) => c.toUpperCase()).toLowerCase()}` : '',
-    function_code: versionForm.protocolType === 'JSON' ? '' : '03', register_address: '', register_length: versionForm.protocolType === 'JSON' ? '' : 2,
-    value_type: versionForm.protocolType === 'JSON' ? '' : 'FLOAT32', byte_order: versionForm.protocolType === 'JSON' ? '' : 'ABCD', scale_factor: 1, offset_value: 0, expression: '', required: 1,
+    protocol_field_id: '', canonical_factor: 1, canonical_offset: 0, display_factor: 1, display_unit: String(item.unit || ''), required: 1,
   }))
   selectedPointIds.value = []
   batchDialog.value = null
@@ -725,7 +807,10 @@ async function disableVersion() {
   finally { saving.value = false }
 }
 
-onMounted(() => loadAll(false))
+watch(protocolOptions, syncBindingSelection)
+watch(bindingProfileKey, onBindingProfileChange)
+
+onMounted(async () => { protocolOptions.value = await publishedProtocolVersions(); await loadAll(false) })
 </script>
 
 <template>
@@ -781,10 +866,10 @@ onMounted(() => loadAll(false))
         <template v-else-if="isModel && model.id">
           <div class="catalog-head">
             <div><p>{{ model.category_name }} / {{ model.brand_name }} / {{ model.series_name }}</p><h2>{{ model.model_name }} <small>{{ model.model_code }}</small></h2></div>
-            <div class="catalog-version-actions"><span :class="['catalog-status', String(version.status).toLowerCase()]">{{ statusLabel(version.status) }}</span><button v-if="canPublishVersion && canEdit" class="quiet" :disabled="validationState === 'running'" @click="validateVersion"><BadgeCheck :size="14" />{{ validationState === 'running' ? '校验中...' : '发布检查' }}</button><button v-if="canPublishVersion && canPublish" class="primary" :disabled="saving" @click="publishVersion">{{ isDisabledVersion ? '重新发布版本' : '发布版本' }}</button><button v-if="!isDraft && canEdit" class="quiet" :disabled="saving" @click="newVersion"><CopyPlus :size="14" />创建新版本</button><button v-if="version.status === 'PUBLISHED' && canDisable" class="quiet danger-text" @click="disableVersion">停用</button><button v-if="canDeleteVersion && canEdit" class="quiet danger-text" :disabled="saving" @click="askDeleteVersion()">删除版本</button></div>
+            <div class="catalog-version-actions"><span :class="['catalog-status', String(version.status).toLowerCase()]">{{ statusLabel(version.status) }}</span><button v-if="!isDraft && canEdit" class="quiet" :disabled="saving" @click="newVersion"><CopyPlus :size="14" />创建新版本</button><button v-if="version.status === 'PUBLISHED' && canDisable" class="quiet danger-text" @click="disableVersion">停用</button><button v-if="canDeleteVersion && canEdit" class="quiet danger-text" :disabled="saving" @click="askDeleteVersion()">删除版本</button></div>
           </div>
-          <div class="catalog-version-bar"><span>版本</span><button v-for="item in versions" :key="String(item.id)" :class="{ active: String(item.id) === String(version.id) }" @click="chooseVersion(item)">{{ item.version_name }} · {{ statusLabel(item.status) }}</button></div>
-          <nav class="archive-tabs catalog-tabs"><button :class="{ active: tab === 'basic' }" @click="tab = 'basic'">基本信息</button><button :class="{ active: tab === 'attributes' }" @click="tab = 'attributes'">产品属性</button><button :class="{ active: tab === 'points' }" @click="tab = 'points'">测点与协议</button><button :class="{ active: tab === 'devices' }" @click="tab = 'devices'">引用设备</button></nav>
+          <div v-if="visibleVersions.length" class="catalog-version-bar"><span>版本</span><button v-for="item in visibleVersions" :key="String(item.id)" :class="{ active: String(item.id) === String(version.id) }" @click="chooseVersion(item)">{{ item.version_name }} · {{ statusLabel(item.status) }}</button></div>
+          <nav class="archive-tabs catalog-tabs"><button :class="{ active: tab === 'basic' }" @click="setDetailTab('basic')">基本信息</button><button :class="{ active: tab === 'attributes', disabled: !protocolBound }" :disabled="!protocolBound" @click="setDetailTab('attributes')">产品属性</button><button :class="{ active: tab === 'points', disabled: !protocolBound }" :disabled="!protocolBound" @click="setDetailTab('points')">测点与协议</button><button :class="{ active: tab === 'devices', disabled: !protocolBound }" :disabled="!protocolBound" @click="setDetailTab('devices')">引用设备</button></nav>
 
           <div class="catalog-content">
             <section v-if="tab === 'basic'" class="catalog-basic-grid">
@@ -797,13 +882,28 @@ onMounted(() => loadAll(false))
                 <button v-if="canEdit && model.image_object_key" class="catalog-model-image-delete" type="button" :disabled="modelImageSaving" aria-label="删除型号图片" title="删除型号图片" @click="clearModelImage"><Trash2 :size="17" /></button>
               </article>
               <article class="panel catalog-version-panel">
-                <div class="panel-head"><h3>版本记录</h3><small>{{ versions.length }} 个版本</small></div>
-                <div class="catalog-version-list"><div v-for="item in versions" :key="String(item.id)" :class="['catalog-version-row', { active: String(item.id) === String(version.id) }]" @click="chooseVersion(item)"><span><b>{{ item.version_name }}</b><small>{{ item.create_time }}<template v-if="item.source_version_id"> · 来源版本 #{{ item.source_version_id }}</template></small></span><em :class="String(item.status).toLowerCase()">{{ statusLabel(item.status) }}</em><ChevronRight :size="15" /></div></div>
+                <div class="panel-head"><h3>版本记录</h3><small>{{ visibleVersions.length }} 个已绑定版本</small></div>
+                <div v-if="visibleVersions.length" class="catalog-version-list"><div v-for="item in visibleVersions" :key="String(item.id)" :class="['catalog-version-row', { active: String(item.id) === String(version.id) }]" @click="chooseVersion(item)"><span><b>{{ item.version_name }}</b><small>{{ item.create_time }}<template v-if="item.source_version_id"> · 来源版本 #{{ item.source_version_id }}</template></small></span><em :class="String(item.status).toLowerCase()">{{ statusLabel(item.status) }}</em><ChevronRight :size="15" /></div></div>
+                <div v-else class="catalog-version-empty"><b>暂无版本记录</b><small>绑定协议后会自动生成正式版本记录。</small></div>
               </article>
-              <article class="panel catalog-form-panel">
-                <div class="panel-head"><h3>版本配置</h3><small>已发布版本只读</small></div>
-                <div class="dialog-fields"><label class="dialog-field"><span>版本号</span><input :value="version.version_name" disabled></label><label class="dialog-field"><span>底层类型编码</span><input :value="version.type_code" disabled></label><label class="dialog-field"><span>协议类型</span><AppSelect v-model="versionForm.protocolType" :disabled="!isDraft" @change="syncPointProtocol"><option>JSON</option><option>MODBUS_RTU</option><option>MODBUS_TCP</option></AppSelect></label><label class="dialog-field"><span>默认采集周期（秒）</span><input v-model.number="versionForm.collectIntervalSeconds" type="number" min="10" :disabled="!isDraft"></label><label class="dialog-field"><span>完整率阈值（%）</span><input v-model.number="versionForm.qualityThresholdPct" type="number" min="1" max="100" :disabled="!isDraft"></label><label class="dialog-field full"><span>版本说明</span><textarea v-model="versionForm.remark" :disabled="!isDraft"></textarea></label></div>
-                <button v-if="isDraft && canEdit" class="primary catalog-save" :disabled="saving" @click="saveBasic"><Save :size="14" />保存草稿</button>
+              <article class="panel catalog-protocol-bind-panel" :class="{ locked: protocolBound }">
+                <div class="panel-head"><h3>协议绑定</h3><small>{{ protocolBound ? '已锁定' : '未绑定' }}</small></div>
+                <template v-if="protocolBound">
+                  <div class="protocol-lock-card">
+                    <BadgeCheck :size="28" />
+                    <b>{{ selectedProtocolOption?.profile_name || '已绑定协议模板' }}</b>
+                    <span>{{ selectedProtocolOption?.version_name || '当前版本' }} · {{ selectedProtocolOption?.manufacturer || '未填写厂家' }}</span>
+                    <div class="protocol-lock-metrics"><label><span>默认采集周期</span><b>{{ versionForm.collectIntervalSeconds || version.collect_interval_seconds || 300 }} 秒</b></label><label><span>完整率阈值</span><b>{{ versionForm.qualityThresholdPct || version.quality_threshold_pct || 80 }}%</b></label></div>
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="protocol-bind-form">
+                    <label><span>协议模板</span><AppSelect v-model="bindingProfileKey" :disabled="!isDraft || !canEdit || !protocolProfileOptions.length"><option value="">请选择协议模板</option><option v-for="item in protocolProfileOptions" :key="protocolProfileKey(item)" :value="protocolProfileKey(item)">{{ item.profile_name }} · {{ item.manufacturer || '未填写厂家' }}</option></AppSelect></label>
+                    <label><span>协议版本</span><AppSelect v-model="bindingVersionId" :disabled="!isDraft || !canEdit || !bindingVersionOptions.length"><option value="">请选择协议版本</option><option v-for="item in bindingVersionOptions" :key="String(item.id)" :value="item.id">{{ item.version_name }} · {{ item.field_count || 0 }} 个字段</option></AppSelect></label>
+                    <div class="protocol-bind-settings"><label><span>默认采集周期（秒）</span><input v-model.number="versionForm.collectIntervalSeconds" type="number" min="10" :disabled="!isDraft || !canEdit"></label><label><span>完整率阈值（%）</span><input v-model.number="versionForm.qualityThresholdPct" type="number" min="1" max="100" :disabled="!isDraft || !canEdit"></label></div>
+                    <button class="primary" type="button" :disabled="saving || !isDraft || !canEdit || !bindingVersionId" @click="confirmProtocolBinding">确认绑定并发布版本</button>
+                  </div>
+                </template>
               </article>
             </section>
 
@@ -834,7 +934,8 @@ onMounted(() => loadAll(false))
             </section>
 
             <section v-else-if="tab === 'points'" class="panel catalog-tab-panel">
-              <div class="panel-head"><h3>测点与协议映射</h3><div class="catalog-point-actions"><button v-if="isDraft && canEdit" class="quiet" @click="openBatch('points')"><Plus :size="14" />批量新增</button></div></div>
+              <div class="panel-head"><h3>平台测点绑定厂家字段</h3><div class="catalog-point-actions"><button v-if="isDraft && canEdit" class="quiet" @click="openBatch('points')"><Plus :size="14" />批量新增</button></div></div>
+              <div class="catalog-flow-note">先从全域终端点位选择平台测点，再为每个测点选择协议中心里的厂家字段；同一个产品版本发布后，绑定该型号的所有设备共用这张点表。</div>
               <div class="template-filter-bar">
                 <label class="catalog-search template-search"><Search :size="14" /><input v-model.trim="templatePointKeyword" placeholder="搜索测点名称、编码或解析路径"></label>
                 <AppSelect v-model="templatePointGroupFilter"><option value="">全部测点组</option><option v-for="group in templatePointGroupOptions" :key="group" :value="group">{{ group }}</option></AppSelect>
@@ -847,19 +948,19 @@ onMounted(() => loadAll(false))
                     <article v-for="item in group.items" :key="String(item.id || item.point_code)" class="realtime-point-card">
                       <div class="realtime-point-card-head"><span>{{ item.point_code }}</span><small>{{ item.data_type }}<template v-if="item.unit"> · {{ item.unit }}</template></small></div>
                       <h4>{{ item.point_name }}</h4>
-                      <div class="point-card-form-row"><label>协议<AppSelect v-if="isDraft && canEdit" v-model="item.mapping_protocol_type"><option>JSON</option><option>MODBUS_RTU</option><option>MODBUS_TCP</option></AppSelect><b v-else>{{ item.mapping_protocol_type || '—' }}</b></label><label>倍率<input v-if="isDraft && canEdit" v-model.number="item.scale_factor" type="number" step="0.000001"><b v-else>{{ item.scale_factor ?? 1 }}</b></label></div>
-                      <label class="point-card-path">解析{{ isModbusPoint(item) ? '寄存器' : '路径' }}<input v-if="isDraft && canEdit && !isModbusPoint(item)" v-model="item.source_path" placeholder="$.realtime.xxx"><input v-else-if="isDraft && canEdit" v-model="item.register_address" type="number" min="0" placeholder="寄存器地址"><b v-else>{{ isModbusPoint(item) ? (item.register_address ?? '—') : (item.source_path || '—') }}</b></label>
+                      <div class="point-card-form-row"><label>显示倍率<input v-if="isDraft && canEdit" v-model.number="item.display_factor" type="number" step="0.000001"><b v-else>{{ item.display_factor ?? 1 }}</b></label><label>显示单位<input v-if="isDraft && canEdit" v-model="item.display_unit"><b v-else>{{ item.display_unit || item.unit || '—' }}</b></label></div>
+                      <label class="point-card-path">协议字段<AppSelect v-if="isDraft && canEdit" v-model="item.protocol_field_id"><option value="">请选择厂家协议字段</option><option v-for="field in protocolFields" :key="String(field.id)" :value="field.id">{{field.field_name}} · {{field.document_address||field.field_code}}</option></AppSelect><b v-else>{{item.field_name||item.field_code||'—'}}</b></label>
                       <div class="realtime-point-meta"><span>{{ item.business_role || 'INSTANT_VALUE' }}</span><button v-if="isDraft && canEdit" class="quiet danger-text table-action" @click="removePoint(pointDrafts.indexOf(item))">移除</button></div>
                     </article>
                   </div>
                   </section>
-                  <p v-if="!realtimePointGroups.length" class="empty-state">暂无符合条件的测点与协议映射。</p>
+                  <p v-if="!realtimePointGroups.length" class="empty-state">暂无测点绑定。先批量新增平台测点；如果没有可选协议字段，请先到协议中心录入并发布厂家协议。</p>
                 </div>
               </div>
               <button v-if="isDraft && canEdit" class="primary catalog-save" :disabled="saving" @click="savePoints"><Save :size="14" />保存测点</button>
             </section>
 
-            <section v-else class="panel catalog-tab-panel"><div class="panel-head"><h3>引用设备</h3><small>{{ devices.length }} 台</small></div><div class="template-filter-bar"><label class="catalog-search template-search"><Search :size="14" /><input v-model.trim="referencedDeviceKeyword" placeholder="搜索设备 SN、名称或网关"></label><AppSelect v-model="referencedDeviceOrgFilter"><option value="">全部组织</option><option v-for="org in referencedDeviceOrgOptions" :key="org" :value="org">{{ org }}</option></AppSelect><AppSelect v-model="referencedDeviceStatusFilter"><option value="">全部状态</option><option v-for="status in referencedDeviceStatusOptions" :key="status" :value="status">{{ status }}</option></AppSelect></div><div class="catalog-table template-scroll"><table><thead><tr><th>设备 SN</th><th>名称</th><th>组织</th><th>网关</th><th>状态</th></tr></thead><tbody><tr v-for="item in filteredReferencedDevices" :key="String(item.id)"><td>{{ item.device_sn }}</td><td>{{ item.device_name }}</td><td>{{ item.org_name || '—' }}</td><td>{{ item.gateway_name || item.gateway_sn || '未接入' }}</td><td>{{ item.status }}</td></tr><tr v-if="!filteredReferencedDevices.length"><td colspan="5" class="empty-cell">暂无符合条件的引用设备</td></tr></tbody></table></div></section>
+            <section v-else class="panel catalog-tab-panel"><div class="panel-head"><h3>引用设备</h3><small>{{ devices.length }} 台</small></div><div class="template-filter-bar"><label class="catalog-search template-search"><Search :size="14" /><input v-model.trim="referencedDeviceKeyword" placeholder="搜索设备 SN、名称、网关或通道"></label><AppSelect v-model="referencedDeviceOrgFilter"><option value="">全部组织</option><option v-for="org in referencedDeviceOrgOptions" :key="org" :value="org">{{ org }}</option></AppSelect><AppSelect v-model="referencedDeviceStatusFilter"><option value="">全部状态</option><option v-for="status in referencedDeviceStatusOptions" :key="status" :value="status">{{ status }}</option></AppSelect></div><div class="catalog-table template-scroll"><table><thead><tr><th>设备 SN</th><th>名称</th><th>组织</th><th>网关</th><th>通道</th><th>从站 ID</th><th>状态</th></tr></thead><tbody><tr v-for="item in filteredReferencedDevices" :key="String(item.id)"><td>{{ item.device_sn }}</td><td>{{ item.device_name }}</td><td>{{ item.org_name || '—' }}</td><td>{{ item.gateway_name || item.gateway_sn || '未接入' }}</td><td>{{ item.channel_name || item.edge_channel_id || '未绑定' }}</td><td>{{ item.protocol_addr || '待填写' }}</td><td>{{ item.status }}</td></tr><tr v-if="!filteredReferencedDevices.length"><td colspan="7" class="empty-cell">暂无符合条件的引用设备</td></tr></tbody></table></div></section>
           </div>
         </template>
         <div v-else class="catalog-empty"><p class="eyebrow">CATALOG NAVIGATION</p><h2>{{ selected?.label || '请选择产品型号' }}</h2><p v-if="treeMode === 'products'">从左侧展开设备分类、品牌和系列，选择具体型号后配置版本、属性、测点和协议。</p><p v-else>属性字典按分类树维护。选择属性节点可查看定义，新增属性时会自动使用当前属性组。</p></div>
@@ -879,7 +980,7 @@ onMounted(() => loadAll(false))
         <template v-if="createKind === 'categories'"><label v-if="!createParentLocked" class="dialog-field"><span>上级分类</span><AppSelect v-model="createForm.parentId"><option :value="0">无</option><option v-for="item in categories" :key="String(item.id)" :value="item.id">{{ item.category_name }}</option></AppSelect></label><label class="dialog-field"><span>分类编码*</span><input v-model="createForm.categoryCode"></label><label class="dialog-field"><span>分类名称*</span><input v-model="createForm.categoryName"></label></template>
         <template v-else-if="createKind === 'brands'"><label v-if="!createParentLocked" class="dialog-field"><span>绑定设备分类*</span><AppSelect v-model="createForm.categoryId"><option value="">请选择分类</option><option v-for="item in categories" :key="String(item.id)" :value="item.id">{{ item.category_name }}</option></AppSelect></label><label class="dialog-field"><span>品牌编码*</span><input v-model="createForm.brandCode" placeholder="已有品牌编码可直接绑定"></label><label class="dialog-field"><span>品牌名称*</span><input v-model="createForm.brandName"></label><small class="dialog-field full catalog-create-hint">如果品牌编码已经存在，系统会复用原品牌并绑定到当前分类，不会重复创建品牌。</small></template>
         <template v-else-if="createKind === 'series'"><label v-if="!createParentLocked" class="dialog-field"><span>设备分类*</span><AppSelect v-model="createForm.categoryId"><option value="">请选择</option><option v-for="item in categories" :key="String(item.id)" :value="item.id">{{ item.category_name }}</option></AppSelect></label><label v-if="!createParentLocked" class="dialog-field"><span>品牌*</span><AppSelect v-model="createForm.brandId"><option value="">请选择</option><option v-for="item in brands" :key="String(item.id)" :value="item.id">{{ item.brand_name }}</option></AppSelect></label><label class="dialog-field"><span>系列编码*</span><input v-model="createForm.seriesCode"></label><label class="dialog-field"><span>系列名称*</span><input v-model="createForm.seriesName"></label></template>
-        <template v-else-if="createKind === 'models'"><label v-if="!createParentLocked" class="dialog-field"><span>产品系列*</span><AppSelect v-model="createForm.seriesId"><option value="">请选择</option><option v-for="item in seriesOptions" :key="String(item.id)" :value="item.id">{{ item.series_name }}</option></AppSelect></label><label class="dialog-field"><span>型号编码*</span><input v-model="createForm.modelCode"></label><label class="dialog-field"><span>型号名称*</span><input v-model="createForm.modelName"></label><label class="dialog-field"><span>默认协议</span><AppSelect v-model="createForm.protocolType"><option>JSON</option><option>MODBUS_RTU</option><option>MODBUS_TCP</option></AppSelect></label><div v-if="catalogEditNode?.id" class="dialog-field full catalog-create-image-field"><span>型号图片</span><div class="catalog-model-image-editor compact"><AppImage class="catalog-model-image-preview" :src="modelImagePreview" :alt="String(createForm.modelName || '型号图片')" @retry="refreshModelImage" /><div class="catalog-model-image-actions"><label class="quiet model-image-upload" :class="{ disabled: modelImageSaving }"><ImagePlus :size="14" />{{ modelImageSaving ? '上传中...' : '上传图片' }}<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" :disabled="modelImageSaving" @change="onModelImageFile"></label><button v-if="createForm.imageObjectKey" class="quiet danger-text" type="button" :disabled="modelImageSaving" @click="clearModelImage"><Trash2 :size="14" />清空图片</button></div></div></div></template>
+        <template v-else-if="createKind === 'models'"><label v-if="!createParentLocked" class="dialog-field"><span>产品系列*</span><AppSelect v-model="createForm.seriesId"><option value="">请选择</option><option v-for="item in seriesOptions" :key="String(item.id)" :value="item.id">{{ item.series_name }}</option></AppSelect></label><label class="dialog-field"><span>型号编码*</span><input v-model="createForm.modelCode"></label><label class="dialog-field"><span>型号名称*</span><input v-model="createForm.modelName"></label><label v-if="!catalogEditNode" class="dialog-field full"><span>厂家协议模板</span><AppSelect v-model="createForm.protocolProfileVersionId"><option value="">暂不绑定，后续在型号版本里选择</option><option v-for="item in protocolOptions" :key="String(item.id)" :value="item.id">{{ item.profile_name }} · {{ item.version_name }} · {{ item.manufacturer || '未填写厂家' }} · {{ item.transport_type }}</option></AppSelect><small>选中后会自动作为 V1 默认协议，并应用协议中心维护的静态属性和测点映射。</small></label><label v-if="!createForm.protocolProfileVersionId" class="dialog-field"><span>通信类型</span><AppSelect v-model="createForm.protocolType"><option>JSON</option><option>MODBUS_RTU</option><option>MODBUS_TCP</option></AppSelect></label><div v-if="catalogEditNode?.id" class="dialog-field full catalog-create-image-field"><span>型号图片</span><div class="catalog-model-image-editor compact"><AppImage class="catalog-model-image-preview" :src="modelImagePreview" :alt="String(createForm.modelName || '型号图片')" @retry="refreshModelImage" /><div class="catalog-model-image-actions"><label class="quiet model-image-upload" :class="{ disabled: modelImageSaving }"><ImagePlus :size="14" />{{ modelImageSaving ? '上传中...' : '上传图片' }}<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" :disabled="modelImageSaving" @change="onModelImageFile"></label><button v-if="createForm.imageObjectKey" class="quiet danger-text" type="button" :disabled="modelImageSaving" @click="clearModelImage"><Trash2 :size="14" />清空图片</button></div></div></div></template>
         <template v-else-if="createKind === 'attribute-groups'"><label class="dialog-field"><span>上级属性组</span><AppSelect v-model="createForm.parentId"><option :value="0">无（根节点）</option><option v-for="item in attributeGroups" :key="String(item.id)" :value="item.id">{{ item.group_name }}</option></AppSelect></label><label class="dialog-field"><span>属性组编码*</span><input v-model="createForm.groupCode"></label><label class="dialog-field"><span>属性组名称*</span><input v-model="createForm.groupName"></label></template>
         <template v-else-if="createKind === 'attributes'"><label class="dialog-field"><span>属性分类*</span><AppSelect v-model="createForm.groupId"><option value="">请选择</option><option v-for="item in attributeGroups" :key="String(item.id)" :value="item.id">{{ item.group_name }}</option></AppSelect></label><label class="dialog-field"><span>适用设备分类</span><AppSelect v-model="createForm.categoryId"><option value="">通用（全部分类）</option><option v-for="item in categories" :key="String(item.id)" :value="item.id">{{ item.category_name }}</option></AppSelect></label><label class="dialog-field"><span>属性编码*</span><input v-model="createForm.attributeCode"></label><label class="dialog-field"><span>属性名称*</span><input v-model="createForm.attributeName"></label><label class="dialog-field"><span>数据类型</span><AppSelect v-model="createForm.dataType"><option>STRING</option><option>NUMBER</option><option>BOOLEAN</option><option>ENUM</option></AppSelect></label><label class="dialog-field"><span>属性用途</span><AppSelect v-model="createForm.usageType"><option>SPEC</option><option>CONFIG</option><option>MEASUREMENT_TEMPLATE</option><option>LIMIT</option></AppSelect></label><label class="dialog-field"><span>单位</span><input v-model="createForm.unit"></label><label class="dialog-field"><span>必填</span><AppSelect v-model.number="createForm.required"><option :value="0">否</option><option :value="1">是</option></AppSelect></label><label class="dialog-field"><span>设备可覆盖</span><AppSelect v-model.number="createForm.allowOverride"><option :value="0">否</option><option :value="1">是</option></AppSelect></label><label v-if="createForm.dataType === 'ENUM'" class="dialog-field full"><span>枚举候选（JSON 数组）</span><textarea v-model="createForm.enumOptions" placeholder='["A","B"]'></textarea></label><label class="dialog-field full"><span>校验规则（JSON）</span><textarea v-model="createForm.validationRule" placeholder='{"min":0,"max":100}'></textarea></label></template>
         <template v-else><label class="dialog-field"><span>适用设备分类</span><AppSelect v-model="createForm.categoryId"><option value="">通用（全部分类）</option><option v-for="item in categories" :key="String(item.id)" :value="item.id">{{ item.category_name }}</option></AppSelect></label><label class="dialog-field"><span>测点编码*</span><input v-model="createForm.pointCode"></label><label class="dialog-field"><span>测点名称*</span><input v-model="createForm.pointName"></label><label class="dialog-field"><span>数据类型</span><AppSelect v-model="createForm.dataType"><option>DOUBLE</option><option>INTEGER</option><option>STRING</option><option>BOOLEAN</option></AppSelect></label><label class="dialog-field"><span>单位</span><input v-model="createForm.unit"></label><label class="dialog-field"><span>业务角色</span><input v-model="createForm.businessRole"></label><label class="dialog-field full"><span>说明</span><textarea v-model="createForm.description"></textarea></label></template>
@@ -902,10 +1003,47 @@ onMounted(() => loadAll(false))
 @media(max-width:760px){.batch-select-head{align-items:stretch;flex-direction:column}.batch-select-head h3,.batch-select-head small{white-space:normal}.batch-search{width:100%;flex:0 0 auto}}
 .catalog-mode-tabs button.active{background:var(--accent);color:#fff}.catalog-create-tools button:hover{border-color:var(--accent);color:var(--accent)}.catalog-status.published{background:#eef6ff;color:#2367bd}.catalog-version-bar button.active{border-color:var(--accent);color:var(--accent)}.catalog-version-list em.published,.catalog-validation .panel-head b.passed,.validation-row.passed{color:#2367bd}.validation-status.passed .validation-status-icon{background:#eef6ff;color:#2367bd}
 .attribute-binding-list,.realtime-point-groups{display:grid;gap:14px}.attribute-binding-group,.realtime-point-group{border:1px solid var(--border);border-radius:8px;background:#fbfdff;overflow:hidden}.binding-group-title{min-height:42px;display:flex;align-items:center;gap:8px;padding:0 14px;border-bottom:1px solid var(--border);color:#36516f}.binding-group-title small{margin-left:auto;color:var(--muted);font-size:11px}.attribute-binding-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;padding:12px}.fixed-attribute-card{display:grid;gap:6px;padding:13px;border:1px solid #dce6f2;border-radius:8px;background:#fff}.fixed-attribute-card small{color:#7890aa;font:10px ui-monospace,Consolas,monospace}.fixed-attribute-card h4{margin:4px 0 0;color:#263d58;font-size:14px}.fixed-attribute-card strong{color:#1f6bc5;font-size:22px}.fixed-attribute-card strong em{font-size:12px;font-style:normal;color:#5d7895}.fixed-attribute-card>span{color:var(--muted);font-size:10px}.fixed-attribute-card input{height:27px;padding:0 7px;border:1px solid var(--border);background:#fff}.realtime-point-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;padding:12px}.realtime-point-card{display:grid;gap:8px;padding:14px;border:1px solid #dce6f2;border-radius:9px;background:#fff;box-shadow:0 3px 10px #284c7310}.realtime-point-card-head{display:flex;justify-content:space-between;gap:8px;color:#66809e;font:10px ui-monospace,Consolas,monospace}.realtime-point-card-head small{padding:2px 6px;border-radius:10px;background:#eef5ff;color:#2879df}.realtime-point-card h4{margin:0;color:#263d58;font-size:14px}.realtime-point-value{display:flex;align-items:baseline;gap:6px;min-height:48px}.realtime-point-value strong{color:#1f6bc5;font-size:30px;font-weight:700}.realtime-point-value em{color:#66809e;font-size:12px;font-style:normal}.realtime-point-meta{display:flex;justify-content:space-between;gap:8px;color:var(--muted);font-size:10px}.realtime-point-meta span:first-child{max-width:150px;overflow:hidden;text-overflow:ellipsis}.point-card-edit{height:26px;padding:0 7px;border:1px solid var(--border);background:#fff}
-.catalog-detail-overlay{overflow:hidden}.catalog-content{flex:1;min-height:0;display:flex;flex-direction:column;padding:12px 14px}.catalog-content>.catalog-tab-panel,.catalog-content>.catalog-basic-grid{flex:1;min-height:0}.catalog-tab-panel{display:flex;flex-direction:column;min-height:0;overflow:hidden}.catalog-basic-grid{align-items:stretch}.catalog-basic-grid>.panel{display:flex;flex-direction:column;min-height:0}.catalog-basic-grid>.panel .dialog-fields,.catalog-version-panel .catalog-version-list{flex:1;min-height:0;overflow:auto;scrollbar-width:none}.catalog-basic-grid>.panel .dialog-fields::-webkit-scrollbar,.catalog-version-panel .catalog-version-list::-webkit-scrollbar{display:none}.template-filter-bar{flex:none;display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);background:#fbfdff}.template-search{flex:1;min-width:220px;width:auto;margin:0;background:#fff}.template-filter-bar select{height:32px;min-width:150px;padding:0 9px;border:1px solid #d6e3f2;border-radius:6px;background:#fff;color:#45617e;outline:0}.template-scroll{flex:1;min-height:0;overflow:auto;scrollbar-width:none;-ms-overflow-style:none}.template-scroll::-webkit-scrollbar{display:none}.catalog-tab-panel>.attribute-binding-list,.catalog-tab-panel>.realtime-point-groups{padding:12px}.catalog-tab-panel>.catalog-save{flex:none;margin:10px 12px}.fixed-attribute-card select{width:100%;height:30px;padding:0 8px;border:1px solid #d6e3f2;border-radius:6px;background:#fff;color:#334f6d}.fixed-attribute-card .table-action{justify-self:start}.point-card-form-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.point-card-form-row label,.point-card-path{display:grid;gap:5px;color:#7087a0;font-size:10px}.point-card-form-row select,.point-card-form-row input,.point-card-path input{width:100%;height:29px;padding:0 8px;border:1px solid #d6e3f2;border-radius:5px;background:#fff;color:#2f4965;outline:0}.point-card-form-row b,.point-card-path b{min-height:29px;display:flex;align-items:center;padding:0 8px;border-radius:5px;background:#f6f9fd;color:#385574;font:11px ui-monospace,Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.point-card-path{padding-top:2px}.realtime-point-card .realtime-point-meta{align-items:center}.realtime-point-card .table-action{margin-left:auto}.catalog-tab-panel>.catalog-table{margin:12px;min-height:0}.catalog-tab-panel>.catalog-table.template-scroll{margin-top:0}@media(max-width:760px){.template-filter-bar{align-items:stretch;flex-direction:column}.template-search,.template-filter-bar select{width:100%;min-width:0}.point-card-form-row{grid-template-columns:1fr}}
+.catalog-detail-overlay{overflow:hidden}.catalog-content{flex:1;min-height:0;display:flex;flex-direction:column;padding:12px 14px}.catalog-content>.catalog-tab-panel,.catalog-content>.catalog-basic-grid{flex:1;min-height:0}.catalog-tab-panel{display:flex;flex-direction:column;min-height:0;overflow:hidden}.catalog-basic-grid{align-items:stretch}.catalog-basic-grid>.panel{display:flex;flex-direction:column;min-height:0}.catalog-basic-grid>.panel .dialog-fields,.catalog-version-panel .catalog-version-list{flex:1;min-height:0;overflow:auto;scrollbar-width:none}.catalog-basic-grid>.panel .dialog-fields::-webkit-scrollbar,.catalog-version-panel .catalog-version-list::-webkit-scrollbar{display:none}.template-filter-bar{flex:none;display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);background:#fbfdff}.catalog-flow-note{flex:none;padding:9px 12px;border-bottom:1px solid #d9e7f5;background:#f4f9ff;color:#4b6782;font-size:11px;line-height:1.6}.template-search{flex:1;min-width:220px;width:auto;margin:0;background:#fff}.template-filter-bar select{height:32px;min-width:150px;padding:0 9px;border:1px solid #d6e3f2;border-radius:6px;background:#fff;color:#45617e;outline:0}.template-scroll{flex:1;min-height:0;overflow:auto;scrollbar-width:none;-ms-overflow-style:none}.template-scroll::-webkit-scrollbar{display:none}.catalog-tab-panel>.attribute-binding-list,.catalog-tab-panel>.realtime-point-groups{padding:12px}.catalog-tab-panel>.catalog-save{flex:none;margin:10px 12px}.fixed-attribute-card select{width:100%;height:30px;padding:0 8px;border:1px solid #d6e3f2;border-radius:6px;background:#fff;color:#334f6d}.fixed-attribute-card .table-action{justify-self:start}.point-card-form-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.point-card-form-row label,.point-card-path{display:grid;gap:5px;color:#7087a0;font-size:10px}.point-card-form-row select,.point-card-form-row input,.point-card-path input{width:100%;height:29px;padding:0 8px;border:1px solid #d6e3f2;border-radius:5px;background:#fff;color:#2f4965;outline:0}.point-card-form-row b,.point-card-path b{min-height:29px;display:flex;align-items:center;padding:0 8px;border-radius:5px;background:#f6f9fd;color:#385574;font:11px ui-monospace,Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.point-card-path{padding-top:2px}.realtime-point-card .realtime-point-meta{align-items:center}.realtime-point-card .table-action{margin-left:auto}.catalog-tab-panel>.catalog-table{margin:12px;min-height:0}.catalog-tab-panel>.catalog-table.template-scroll{margin-top:0}@media(max-width:760px){.template-filter-bar{align-items:stretch;flex-direction:column}.template-search,.template-filter-bar select{width:100%;min-width:0}.point-card-form-row{grid-template-columns:1fr}}
 .catalog-version-panel .catalog-version-list{align-content:start;grid-auto-rows:min-content}.catalog-version-row{min-height:44px;padding:7px 10px}.catalog-version-row small{margin-top:3px}.catalog-tab-panel>.attribute-binding-list,.catalog-tab-panel>.realtime-point-groups{gap:9px;padding:9px}.attribute-binding-group,.realtime-point-group{border-radius:7px}.binding-group-title{min-height:34px;padding:0 10px;font-size:12px}.attribute-binding-grid{grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:7px;padding:8px}.fixed-attribute-card{gap:4px;padding:9px;border-radius:6px}.fixed-attribute-card h4{margin:1px 0 0;font-size:12px;line-height:1.3}.fixed-attribute-card small{font-size:9px}.fixed-attribute-card strong{font-size:16px;line-height:1.25}.fixed-attribute-card>span{font-size:9px}.fixed-attribute-card select{height:28px;font-size:11px}.realtime-point-grid{grid-template-columns:repeat(auto-fill,minmax(184px,1fr));gap:8px;padding:8px}.realtime-point-card{gap:6px;padding:10px;border-radius:7px}.realtime-point-card h4{font-size:12px}.point-card-form-row{gap:6px}.point-card-form-row label,.point-card-path{gap:3px;font-size:9px}.point-card-form-row select,.point-card-form-row input,.point-card-path input{height:27px;font-size:10px}.point-card-form-row b,.point-card-path b{min-height:27px;font-size:10px}.realtime-point-meta{font-size:9px}
 .template-filter-bar select,.fixed-attribute-card select,.point-card-form-row select{appearance:none;padding-right:31px;border-color:#d6e1ed;border-radius:8px;background-color:#fff;background-image:linear-gradient(45deg,transparent 50%,#7890aa 50%),linear-gradient(135deg,#7890aa 50%,transparent 50%);background-position:calc(100% - 15px) calc(50% - 2px),calc(100% - 10px) calc(50% - 2px);background-size:5px 5px,5px 5px;background-repeat:no-repeat;box-shadow:0 1px 2px #17375c08}.template-filter-bar select{height:36px}.fixed-attribute-card select{height:28px}.point-card-form-row select{height:27px}
 .catalog-template-scroll{flex:1;min-height:0;margin:0 10px 10px;padding:0 3px 0 0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#c7d8eb transparent}.catalog-template-scroll::-webkit-scrollbar{width:6px}.catalog-template-scroll::-webkit-scrollbar-thumb{border-radius:999px;background:#c7d8eb}.catalog-template-scroll>.attribute-binding-list,.catalog-template-scroll>.realtime-point-groups{display:grid;gap:9px;min-height:min-content;padding:9px 10px 16px}.realtime-point-group{overflow:hidden}.realtime-point-grid{align-items:start;grid-auto-rows:min-content;padding:10px}.realtime-point-card{display:grid;align-content:start;align-self:start;min-width:0;min-height:0;max-height:none;margin:7px 0;padding:14px 12px;overflow:visible}.realtime-point-card>*{min-width:0;min-height:0}.realtime-point-card-head{align-items:flex-start;min-width:0}.realtime-point-card-head>span{min-width:0;flex:1 1 auto;overflow-wrap:anywhere;line-height:1.35}.realtime-point-card-head small{min-width:0;max-width:48%;flex:0 1 auto;white-space:normal;overflow-wrap:anywhere;text-align:right;line-height:1.35}.realtime-point-card h4{overflow-wrap:anywhere;line-height:1.4}.point-card-form-row{grid-template-columns:repeat(auto-fit,minmax(min(100%,112px),1fr));align-items:start}.point-card-form-row label,.point-card-path{min-width:0}.point-card-form-row select,.point-card-form-row input,.point-card-path input{box-sizing:border-box;min-width:0}.point-card-path b{display:block;min-width:0;white-space:normal;overflow:visible;overflow-wrap:anywhere;word-break:break-word;height:auto;min-height:27px;padding-top:5px;padding-bottom:5px}.realtime-point-meta span:first-child{max-width:none;white-space:normal;overflow-wrap:anywhere}.realtime-point-card .realtime-point-meta{min-height:22px;align-items:center}
 .catalog-model-image-editor.compact{display:flex;align-items:center;gap:14px;padding:0;background:transparent}.catalog-model-image-preview{width:128px;aspect-ratio:4/3;display:grid;place-items:center;flex:none;overflow:hidden;border:1px solid #d7e4f2;background:#fff;color:#8a9bad;font-size:12px}.catalog-model-image-preview img{width:100%;height:100%;object-fit:cover;display:block}.catalog-model-image-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.model-image-upload{position:relative;height:30px;display:inline-flex;align-items:center;gap:5px;padding:0 10px;border:1px solid var(--border);background:#fff;color:#52667e;cursor:pointer;font-size:11px}.model-image-upload input{position:absolute;inset:0;opacity:0;cursor:pointer}.model-image-upload.disabled{opacity:.55;pointer-events:none}@media(max-width:720px){.catalog-model-image-editor.compact{align-items:stretch;flex-direction:column}.catalog-model-image-preview{width:100%}}
 .catalog-model-upload-frame .catalog-model-image{position:absolute;inset:0;width:100%;height:100%}
+.protocol-template-picker{display:flex;align-items:center;gap:8px}.protocol-template-picker .app-select{flex:1;min-width:0}.protocol-template-picker button{flex:none;height:32px;padding:0 12px;white-space:nowrap}
+.catalog-tabs button.disabled{opacity:.45;cursor:not-allowed;background:#f4f7fb;color:#8aa0b8}.catalog-tabs button.disabled:hover{color:#8aa0b8}
+.catalog-basic-grid{grid-template-columns:minmax(210px,.52fr) minmax(330px,1fr) minmax(280px,.78fr);grid-template-rows:minmax(150px,.72fr) minmax(220px,1fr)}
+.catalog-form-panel{grid-row:1 / 3}.catalog-protocol-bind-panel{grid-row:1 / 3;min-width:0;background:#fbfdff}.catalog-protocol-bind-panel.locked{background:#f4f7fb;color:#71839a}.protocol-bind-form{display:grid;gap:14px;padding:16px}.protocol-bind-form label{display:grid;gap:6px;color:#647c96;font-size:12px}.protocol-bind-form label span{font-weight:650;color:#34506d}.protocol-bind-form .app-select{width:100%;height:34px}.protocol-bind-form .primary{width:100%;min-height:36px;justify-content:center}.protocol-bind-form small{color:#72869b;font-size:12px;line-height:1.65}.protocol-lock-card{display:grid;align-content:center;justify-items:center;gap:10px;min-height:260px;margin:14px;padding:22px;border:1px solid #d6e1ed;border-radius:8px;background:#eef3f8;text-align:center}.protocol-lock-card svg{color:#3d7fc6}.protocol-lock-card b{max-width:100%;color:#2f4965;font-size:16px;overflow-wrap:anywhere}.protocol-lock-card span{color:#5f7892;font-size:12px}.protocol-lock-card small{max-width:280px;color:#70859b;font-size:12px;line-height:1.7}
+@media(max-width:1180px){.catalog-basic-grid{grid-template-columns:1fr 1fr;grid-template-rows:auto}.catalog-model-image-panel{grid-row:auto}.catalog-form-panel,.catalog-protocol-bind-panel{grid-row:auto}}
+@media(max-width:760px){.catalog-basic-grid{grid-template-columns:1fr}}
+.catalog-basic-grid{grid-template-columns:minmax(360px,1.15fr) minmax(300px,.85fr);grid-template-rows:repeat(10,minmax(0,1fr));gap:12px}
+.catalog-model-image-panel{grid-column:1;grid-row:1 / span 10;min-height:0}
+.catalog-model-upload-frame{min-height:0}
+.catalog-model-upload-frame .catalog-model-image,.catalog-model-upload-frame img{object-fit:contain;background:#fff}
+.catalog-version-panel{grid-column:2;grid-row:1 / span 3;min-width:0}
+.catalog-protocol-bind-panel{grid-column:2;grid-row:4 / span 7;min-width:0;background:#fbfdff}
+.catalog-version-panel .panel-head,.catalog-protocol-bind-panel .panel-head,.catalog-form-panel .panel-head{flex:none}
+.catalog-version-panel .catalog-version-list{flex:1;min-height:0;max-height:none;overflow:auto;scrollbar-width:thin}
+.catalog-version-panel .catalog-version-list::-webkit-scrollbar{display:block;width:8px}
+.catalog-version-panel .catalog-version-list::-webkit-scrollbar-thumb{border-radius:6px;background:#c8d6e6}
+.catalog-version-empty{flex:1;min-height:120px;display:grid;align-content:center;justify-items:center;gap:8px;padding:18px;color:#71839a;text-align:center}
+.catalog-version-empty b{color:#36516f;font-size:14px}
+.catalog-version-empty small{max-width:220px;font-size:12px;line-height:1.6}
+.catalog-protocol-bind-panel.locked{background:#f4f7fb;color:#71839a}
+.protocol-bind-form{display:grid;gap:14px;padding:16px}
+.protocol-bind-form label{display:grid;gap:6px;color:#647c96;font-size:12px}
+.protocol-bind-form label span{font-weight:650;color:#34506d}
+.protocol-bind-form .app-select{width:100%;height:34px}
+.protocol-bind-settings{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.protocol-bind-settings input{width:100%;height:34px;padding:0 9px;border:1px solid #d6e3f2;border-radius:6px;background:#fff;color:#2f4965;outline:0}
+.protocol-bind-form .primary{width:100%;min-height:36px;justify-content:center}
+.protocol-lock-card{display:grid;align-content:center;justify-items:center;gap:12px;min-height:210px;margin:14px;padding:22px;border:1px solid #d6e1ed;border-radius:8px;background:#eef3f8;text-align:center}
+.protocol-lock-card svg{color:#3d7fc6}
+.protocol-lock-card b{max-width:100%;color:#2f4965;font-size:16px;overflow-wrap:anywhere}
+.protocol-lock-card span{color:#5f7892;font-size:12px}
+.protocol-lock-metrics{width:min(100%,360px);display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:2px}
+.protocol-lock-metrics label{display:grid;gap:6px;padding:10px;border:1px solid #d3e0ef;border-radius:7px;background:#fff}
+.protocol-lock-metrics label span{color:#6b829a;font-size:11px}
+.protocol-lock-metrics label b{color:#24415f;font-size:18px}
+@media(max-width:1180px){.catalog-basic-grid{grid-template-columns:1fr 1fr;grid-template-rows:auto}.catalog-model-image-panel,.catalog-form-panel,.catalog-version-panel,.catalog-protocol-bind-panel{grid-column:auto;grid-row:auto}}
+@media(max-width:760px){.catalog-basic-grid{grid-template-columns:1fr}.catalog-model-upload-frame{min-height:360px}.protocol-bind-settings,.protocol-lock-metrics{grid-template-columns:1fr}}
 </style>
