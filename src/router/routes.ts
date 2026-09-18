@@ -5,6 +5,7 @@ const componentFor = (kind: string) => {
   if (kind === 'energy-screen') return () => import('@/views/EnergyScreenView.vue')
   if (kind === 'device-archive') return () => import('@/views/DeviceArchiveView.vue')
   if (kind === 'product-catalog') return () => import('@/views/ProductCatalogView.vue')
+  if (kind === 'protocol-catalog') return () => import('@/views/ProtocolCatalogView.vue')
   if (kind === 'global-dictionary') return () => import('@/views/GlobalDictionaryView.vue')
   if (kind === 'resource') return () => import('@/views/ResourceView.vue')
   if (['monitor', 'analysis', 'quality'].includes(kind)) return () => import('@/views/EnergyView.vue')
@@ -33,8 +34,9 @@ export const routeRecords: RouteRecordRaw[] = [
   page('/energy-screen', 'energy-screen', '园区能源大屏', undefined, 'energy-screen'),
   page('/device-archive/org-tree', 'device-archive-org-tree', '组织档案树', 'archive:list', 'device-archive', 'org-tree'), page('/device-archive/devices', 'device-archive-devices', '设备档案', 'archive:list', 'device-archive', 'devices'), page('/device-archive/devices/:id', 'device-archive-device-detail', '设备详情', 'archive:list', 'device-archive', 'device-detail'),
   page('/archive/catalog', 'product-catalog', '产品目录', 'archive:list', 'product-catalog'),
+  page('/archive/protocols', 'protocol-catalog', '协议中心', 'archive:list', 'protocol-catalog'),
   page('/archive/global-attributes', 'global-attributes', '全域属性', 'archive:list', 'global-dictionary', 'global-attributes'), page('/archive/global-points', 'global-points', '终端点位', 'archive:list', 'global-dictionary', 'global-points'),
-  page('/archive/orgs', 'archive-orgs', '组织管理', 'archive:list', 'resource', 'orgs'), page('/archive/spaces', 'archive-spaces', '空间台账', 'archive:list', 'resource', 'spaces'), page('/archive/gateways', 'archive-gateways', '网关管理', 'archive:list', 'resource', 'gateways'), page('/archive/devices', 'archive-devices', '设备管理', 'archive:list', 'resource', 'devices'), page('/archive/device-types', 'archive-device-types', '设备类型', 'archive:list', 'resource', 'device-types'), page('/archive/point-definitions', 'archive-point-definitions', '测点定义', 'archive:list', 'resource', 'point-definitions'), page('/archive/point-mappings', 'archive-point-mappings', '协议映射', 'archive:list', 'resource', 'point-mappings'),
+  page('/archive/orgs', 'archive-orgs', '组织管理', 'archive:list', 'resource', 'orgs'), page('/archive/spaces', 'archive-spaces', '空间台账', 'archive:list', 'resource', 'spaces'), page('/archive/gateways', 'archive-gateways', '网关管理', 'archive:list', 'resource', 'gateways'), page('/archive/devices', 'archive-devices', '设备管理', 'archive:list', 'resource', 'devices'), page('/archive/device-types', 'archive-device-types', '设备类型', 'archive:list', 'resource', 'device-types'), page('/archive/point-definitions', 'archive-point-definitions', '测点定义', 'archive:list', 'resource', 'point-definitions'),
   page('/power-efficiency', 'power-efficiency', '电力能效', 'energy:view', 'power-efficiency'),
   { path: '/monitor/realtime', redirect: '/power-efficiency' }, { path: '/analysis/history', redirect: '/power-efficiency?tab=history' }, { path: '/analysis/quality', redirect: '/power-efficiency?tab=statistics' }, { path: '/analysis/data-quality', redirect: '/power-efficiency?tab=quality' },
   page('/alarms/events', 'alarms-events', '告警工作台', 'alarm:rule:list', 'alarms'),

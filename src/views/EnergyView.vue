@@ -75,7 +75,7 @@ const numberValue = (value: unknown) => {
   const number = Number(value)
   return Number.isFinite(number) ? number : 0
 }
-const displayNumber = (value: unknown, digits = 2) => Number(value || 0).toLocaleString('zh-CN', { maximumFractionDigits: digits })
+const displayNumber = (value: unknown, digits = 2) => Number(value || 0).toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits })
 const syncQueryFilters = () => {
   orgId.value = queryText(route.query.orgId)
   spaceId.value = queryText(route.query.spaceId)
@@ -210,9 +210,9 @@ const monitorColumns: TableColumn[] = [
   { key: 'stat_date', label: '统计日期' },
   { key: 'device_name', label: '设备' },
   { key: 'point_code', label: '测点' },
-  { key: 'start_value', label: '起始值' },
-  { key: 'end_value', label: '结束值' },
-  { key: 'usage_value', label: '用量' },
+  { key: 'start_value', label: '起始值', format: (value) => displayNumber(value) },
+  { key: 'end_value', label: '结束值', format: (value) => displayNumber(value) },
+  { key: 'usage_value', label: '用量', format: (value) => displayNumber(value) },
   { key: 'collection_complete_rate', label: '采集完整率', format: (value) => `${Number(value || 0).toFixed(2)}%` },
 ]
 const qualityColumns: TableColumn[] = [
@@ -250,7 +250,7 @@ function chartOption(data: SeriesRow[], type: 'line' | 'bar' = 'line'): EChartsC
   const codes = [...new Set(data.map((row) => row.pointCode))]
   return {
     color: ['#2364c8', '#22a6b3', '#f59e0b', '#ef4444', '#6d5dfc'],
-    tooltip: { trigger: 'axis' },
+    tooltip: { trigger: 'axis', valueFormatter: (value: unknown) => displayNumber(value) },
     legend: { top: 0, right: 4, textStyle: { color: '#64748b', fontSize: 11 } },
     grid: { left: 42, right: 18, top: 40, bottom: 42 },
     dataZoom: [{ type: 'inside' }, { type: 'slider', height: 18, bottom: 8 }],
