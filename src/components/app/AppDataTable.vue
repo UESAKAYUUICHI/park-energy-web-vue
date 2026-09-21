@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import AppLoadingState from '@/components/app/AppLoadingState.vue'
 import type { RecordRow } from '@/types/domain'
+import { displayValue } from '@/utils/displayValue'
 
 export interface TableColumn {
   key: string
@@ -49,10 +50,7 @@ watch(() => props.loading, (loading, wasLoading) => {
 
 const valueOf = (row: RecordRow, column: TableColumn) => {
   if (column.format) return column.format(row[column.key], row)
-  const value = row[column.key]
-  if (value === null || value === undefined || value === '') return '—'
-  if (typeof value === 'object') return JSON.stringify(value)
-  return value
+  return displayValue(column.key, row[column.key], row)
 }
 const goPage = (next: number) => {
   const target = Math.min(pageCount.value, Math.max(1, next))

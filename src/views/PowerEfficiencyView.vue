@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Activity, Gauge, History, ShieldCheck } from '@lucide/vue'
+import { Activity, Gauge, History } from '@lucide/vue'
 import PowerEfficiencyWorkbench from '@/views/PowerEfficiencyWorkbench.vue'
 
-type Tab = 'three-phase-monitor' | 'power-efficiency-analysis' | 'energy-consume-statistics' | 'data-model-predict'
+type Tab = 'three-phase-monitor' | 'power-efficiency-analysis' | 'energy-consume-statistics'
 const route = useRoute()
 const router = useRouter()
 const tab = computed<Tab>(() => {
@@ -13,11 +13,10 @@ const tab = computed<Tab>(() => {
     realtime: 'three-phase-monitor',
     history: 'power-efficiency-analysis',
     statistics: 'energy-consume-statistics',
-    quality: 'data-model-predict',
+    quality: 'energy-consume-statistics',
     'three-phase-monitor': 'three-phase-monitor',
     'power-efficiency-analysis': 'power-efficiency-analysis',
     'energy-consume-statistics': 'energy-consume-statistics',
-    'data-model-predict': 'data-model-predict',
   }
   return aliases[value] || 'three-phase-monitor'
 })
@@ -25,9 +24,11 @@ const tabs: Array<{ key: Tab; label: string; icon: typeof Activity; description:
   { key: 'three-phase-monitor', label: '三相监测', icon: Activity, description: '三相平衡、电压电流越限、电网频率质量' },
   { key: 'power-efficiency-analysis', label: '功率分析', icon: Gauge, description: '功率因数、无功损耗、负载率趋势' },
   { key: 'energy-consume-statistics', label: '能耗统计', icon: History, description: '日周月能耗、峰谷波动、累计趋势' },
-  { key: 'data-model-predict', label: '模型预测', icon: ShieldCheck, description: '模型仿真预测与风险推演' },
 ]
-function switchTab(next: Tab) { void router.replace({ query: next === 'three-phase-monitor' ? {} : { tab: next } }) }
+function switchTab(next: string) {
+  const normalized = ['three-phase-monitor', 'power-efficiency-analysis', 'energy-consume-statistics'].includes(next) ? next as Tab : 'three-phase-monitor'
+  void router.replace({ query: normalized === 'three-phase-monitor' ? {} : { tab: normalized } })
+}
 </script>
 
 <template>

@@ -11,6 +11,7 @@ import { audit, rbac, rbacPage, resourceOptions } from '@/api/platform'
 import type { RecordRow } from '@/types/domain'
 import { useSessionStore } from '@/stores/session'
 import { fieldLabel } from '@/utils/fieldLabels'
+import { displayValue } from '@/utils/displayValue'
 
 const route = useRoute()
 const session = useSessionStore()
@@ -163,7 +164,7 @@ const systemColumns = computed<TableColumn[]>(() => {
   rows.value.forEach((row) => Object.keys(row).forEach((key) => keys.add(key)))
   return [...keys].map((key) => ({ key, label: fieldLabel(key, labels.get(key)), format: systemFormat(key) }))
 })
-const selectedDetailItems = computed(() => selected.value ? Object.entries(selected.value).map(([key, value]) => [fieldLabel(key), displayJsonValue(value) || '—']) : [])
+const selectedDetailItems = computed(() => selected.value ? Object.entries(selected.value).map(([key, value]) => [fieldLabel(key), displayJsonValue(displayValue(key, value, selected.value as RecordRow)) || '—']) : [])
 const permissionRows = computed(() => {
   const byParent = new Map<string, RecordRow[]>()
   rows.value.forEach((item) => {

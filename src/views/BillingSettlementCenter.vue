@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import { showAppAlert } from "@/composables/useAppAlert";
 import {
   AlertTriangle,
@@ -88,6 +89,7 @@ import contractStamp from "@/assets/contract-stamp.png";
 
 type CenterView = "overview" | "rules" | "payments" | "archives";
 const props = defineProps<{ view: CenterView }>();
+const router = useRouter();
 const monthValue = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 const defaultCycle = () => {
@@ -341,7 +343,49 @@ const rows = computed(() =>
     Array.isArray(payload.value.todos)
       ? (payload.value.todos as RecordRow[])
       : [],
+  ),
+  overviewStages = computed(() =>
+    Array.isArray(payload.value.stages)
+      ? (payload.value.stages as RecordRow[])
+      : [],
+  ),
+  overviewRisks = computed(() =>
+    Array.isArray(payload.value.riskSubjects)
+      ? (payload.value.riskSubjects as RecordRow[])
+      : [],
+  ),
+  overviewEvents = computed(() =>
+    Array.isArray(payload.value.recentEvents)
+      ? (payload.value.recentEvents as RecordRow[])
+      : [],
+  ),
+  overviewSubjects = computed(() =>
+    Array.isArray(payload.value.subjects)
+      ? (payload.value.subjects as RecordRow[])
+      : [],
   );
+const overviewTotalReceivable = computed(() =>
+  Number(summary.value.issuedAmount || 0),
+);
+const overviewPaidRate = computed(() =>
+  overviewTotalReceivable.value > 0
+    ? Math.round((Number(summary.value.paidAmount || 0) / overviewTotalReceivable.value) * 100)
+    : 0,
+);
+const overviewHealthScore = computed(() => {
+  const total = Number(summary.value.subjectCount || 0);
+  if (!total) return 100;
+  const blocked = Number(summary.value.blockedSubjects || 0);
+  const reviewing = Number(summary.value.reviewSubjects || 0);
+  const openPeriods = Number(summary.value.openPeriods || 0);
+  return Math.max(0, Math.min(100, Math.round(100 - (blocked / total) * 40 - reviewing * 5 - openPeriods * 3)));
+});
+const percent = (current: unknown, total: unknown) => {
+  const c = Number(current || 0);
+  const t = Number(total || 0);
+  if (!t) return 0;
+  return Math.max(0, Math.min(100, Math.round((c / t) * 100)));
+};
 const archiveSummary = computed(() => ({
   receivable: periods.value.reduce(
     (n, r) => n + Number(r.issuedAmount || r.issued_amount || 0),
@@ -776,6 +820,30 @@ async function openAux(m: "spaces" | "pricing") {
   auxKeyword.value = "";
   auxStatus.value = "";
   auxManagerOpen.value = true;
+}
+function todoActionText(item: RecordRow) {
+  const stage = String(item.stage || "");
+  if (stage === "对象准入") return "去补准入";
+  if (stage === "方案生效") return "配置计价";
+  if (stage === "出账作业") return "处理账单";
+  if (stage === "关账归档") return "去归档";
+  return "去处理";
+}
+async function handleOverviewTodo(item: RecordRow) {
+  const stage = String(item.stage || "");
+  if (stage === "方案生效") {
+    await openAux("pricing");
+    return;
+  }
+  if (stage === "出账作业") {
+    await router.push("/billing/payments");
+    return;
+  }
+  if (stage === "关账归档") {
+    await router.push("/billing/archives");
+    return;
+  }
+  await router.push("/billing/rules");
 }
 async function openContractPricing(r: RecordRow) {
   try {
@@ -2139,144 +2207,138 @@ watch(
         <AlertTriangle :size="15" />{{ error }}
       </p>
       <template v-if="props.view === 'overview'"
-        ><section class="metric-grid">
+        ><section class="business-overview-hero">
+          <article class="overview-command-panel">
+            <div>
+              <span>本期应收</span>
+              <strong>¥{{ money(summary.issuedAmount) }}</strong>
+              <small>{{ summary.cycle || cycle }} · {{ summary.subjectCount || 0 }} 个结算对象</small>
+            </div>
+            <div class="overview-ring" :style="{ '--rate': `${overviewPaidRate}%` }">
+              <b>{{ overviewPaidRate }}%</b><small>回收率</small>
+            </div>
+          </article>
+          <article class="overview-health-panel">
+            <span>业务健康度</span>
+            <strong>{{ overviewHealthScore }}</strong>
+            <small>阻断 {{ summary.blockedSubjects || 0 }} · 待审 {{ summary.reviewSubjects || 0 }} · 差异 {{ summary.differenceCount || 0 }}</small>
+            <i><b :style="{ width: `${overviewHealthScore}%` }"></b></i>
+          </article>
+          <article class="overview-cash-panel">
+            <span>待收款金额</span>
+            <strong>¥{{ money(summary.outstandingAmount) }}</strong>
+            <small>已收 ¥{{ money(summary.paidAmount) }}</small>
+          </article>
+        </section>
+        <section class="metric-grid overview-metric-grid">
           <article>
-            <span>待完善规则</span><b>{{ summary.blockedSubjects || 0 }}</b
-            ><small>合同、表计或计价规则</small>
+            <span>待完善对象</span><b>{{ summary.blockedSubjects || 0 }}</b
+            ><small>合同、空间、表计或规则未闭合</small>
           </article>
           <article>
             <span>待审核账单</span><b>{{ summary.reviewSubjects || 0 }}</b
-            ><small>等待财务确认</small>
+            ><small>需要财务确认后发布</small>
           </article>
           <article>
-            <span>待收款金额</span><b>¥{{ money(summary.outstandingAmount) }}</b
-            ><small>已形成应收</small>
+            <span>已发布对象</span><b>{{ summary.issuedSubjects || 0 }}</b
+            ><small>本期已形成应收</small>
           </article>
           <article>
             <span>待归档账期</span><b>{{ summary.openPeriods || 0 }}</b
-            ><small>完成对账后归档</small>
+            ><small>{{ summary.closeablePeriods || 0 }} 个账期可关账</small>
           </article>
         </section>
-        <section class="overview-charts">
-          <article class="panel chart-panel">
+        <section class="overview-process-grid">
+          <article class="panel overview-flow-panel">
             <header>
               <div>
-                <b>本期结算金额走势</b><small>规则准备、出账、收款、归档</small>
+                <b>结算流程进度</b><small>按当前账期的对象和账期状态计算</small>
               </div>
+              <strong>{{ summary.cycle || cycle }}</strong>
+            </header>
+            <div class="overview-stage-list">
+              <div v-for="item in overviewStages" :key="String(item.label || item.stage)" class="overview-stage-row">
+                <span>
+                  <b>{{ item.label }}</b>
+                  <small>异常 {{ item.blocked || 0 }} · {{ item.done || 0 }}/{{ item.total || 0 }}</small>
+                </span>
+                <i><b :style="{ width: `${percent(item.done, item.total)}%` }"></b></i>
+                <strong>{{ percent(item.done, item.total) }}%</strong>
+              </div>
+              <p v-if="!overviewStages.length" class="empty">暂无流程数据。</p>
+            </div>
+          </article>
+          <article class="panel overview-money-panel">
+            <header>
+              <div><b>金额结构</b><small>应收、实收和未收余额</small></div>
               <strong>¥{{ money(summary.outstandingAmount) }}</strong>
             </header>
-            <svg viewBox="0 0 600 180">
-              <polyline
-                points="20,140 130,112 240,126 350,78 460,92 580,42"
-                fill="none"
-                stroke="#397b9e"
-                stroke-width="3"
-              />
-              <polyline
-                points="20,140 130,112 240,126 350,78 460,92 580,42 580,160 20,160"
-                fill="#397b9e12"
-                stroke="none"
-              />
-              <g fill="#397b9e">
-                <circle cx="20" cy="140" r="4" />
-                <circle cx="130" cy="112" r="4" />
-                <circle cx="240" cy="126" r="4" />
-                <circle cx="350" cy="78" r="4" />
-                <circle cx="460" cy="92" r="4" />
-                <circle cx="580" cy="42" r="4" />
-              </g>
-            </svg>
-            <div class="chart-axis">
-              <span>规则</span><span>审核</span><span>出账</span
-              ><span>收款</span><span>对账</span><span>归档</span>
+            <div class="overview-amount-stack">
+              <span class="paid" :style="{ width: `${percent(summary.paidAmount, summary.issuedAmount)}%` }"></span>
+              <span class="unpaid" :style="{ width: `${percent(summary.outstandingAmount, summary.issuedAmount)}%` }"></span>
             </div>
-          </article>
-          <article class="panel chart-panel">
-            <header>
-              <div><b>账单状态结构</b><small>当前账期业务分布</small></div>
-              <strong>{{ summary.reviewSubjects || 0 }} 待审核</strong>
-            </header>
-            <div class="status-bars">
-              <div>
-                <span>待审核</span
-                ><i
-                  ><b
-                    :style="{
-                      width: `${Math.min(100, Number(summary.reviewSubjects || 0) * 12 + 8)}%`,
-                    }"
-                  ></b></i
-                ><strong>{{ summary.reviewSubjects || 0 }}</strong>
-              </div>
-              <div>
-                <span>待收款</span
-                ><i
-                  ><b
-                    :style="{
-                      width: `${jobSummary.outstanding || summary.outstandingAmount ? 68 : 12}%`,
-                    }"
-                  ></b></i
-                ><strong
-                  >¥{{
-                    money(jobSummary.outstanding || summary.outstandingAmount)
-                  }}</strong
-                >
-              </div>
-              <div>
-                <span>已收款</span
-                ><i
-                  ><b
-                    class="paid"
-                    :style="{ width: `${summary.paidAmount ? 76 : 16}%` }"
-                  ></b></i
-                ><strong>¥{{ money(summary.paidAmount) }}</strong>
-              </div>
-              <div>
-                <span>待归档</span
-                ><i
-                  ><b
-                    class="archive"
-                    :style="{
-                      width: `${Math.min(100, Number(summary.openPeriods || 0) * 18 + 10)}%`,
-                    }"
-                  ></b></i
-                ><strong>{{ summary.openPeriods || 0 }}</strong>
-              </div>
-            </div>
+            <dl class="summary-list overview-amount-list">
+              <div><dt>应收金额</dt><dd>¥{{ money(summary.issuedAmount) }}</dd></div>
+              <div><dt>已收金额</dt><dd>¥{{ money(summary.paidAmount) }}</dd></div>
+              <div><dt>未收余额</dt><dd>¥{{ money(summary.outstandingAmount) }}</dd></div>
+              <div><dt>对账差异</dt><dd>{{ summary.differenceCount || 0 }}</dd></div>
+            </dl>
           </article>
         </section>
-        <section class="overview-columns">
-          <article class="panel">
-            <header><b>待办事项</b><small>只显示需要处理的业务</small></header>
+        <section class="overview-columns overview-work-grid">
+          <article class="panel overview-todo-panel">
+            <header><b>待办队列</b><small>点击右侧入口进入对应处理环节</small></header>
             <button
               v-for="item in todos"
               :key="`${item.stage}-${item.title}`"
               class="todo-row"
+              @click="handleOverviewTodo(item)"
             >
               <span
                 ><b>{{ item.title }}</b
                 ><small>{{ item.detail }}</small></span
-              ><strong>{{ item.stage }}</strong>
+              ><strong><em>{{ item.stage }}</em><small>{{ todoActionText(item) }}</small></strong>
             </button>
             <p v-if="!todos.length" class="empty">暂无待办。</p>
+            <div class="overview-todo-flow">
+              处理顺序：结算规则补齐准入 → 配置计价方案 → 账单支付审核发布 → 结算档案关账归档
+            </div>
           </article>
-          <article class="panel">
-            <header>
-              <b>本期结算概况</b><small>{{ summary.cycle || cycle }}</small>
-            </header>
-            <dl class="summary-list">
-              <div>
-                <dt>已收金额</dt>
-                <dd>¥{{ money(summary.paidAmount) }}</dd>
+          <article class="panel overview-risk-panel">
+            <header><b>风险对象</b><small>优先处理未收款或链路阻断对象</small></header>
+            <div class="overview-risk-list">
+              <div v-for="item in overviewRisks" :key="String(item.accountId || item.id)" class="overview-risk-row">
+                <span>
+                  <b>{{ item.subjectName || item.accountName || '未命名对象' }}</b>
+                  <small>{{ item.orgName || '—' }} · {{ item.jobText || item.schemeText || item.admissionText || '—' }}</small>
+                </span>
+                <strong>¥{{ money(item.outstandingAmount) }}</strong>
               </div>
-              <div>
-                <dt>存在对账差异</dt>
-                <dd>{{ summary.differenceCount || 0 }}</dd>
+              <p v-if="!overviewRisks.length" class="empty">暂无风险对象。</p>
+            </div>
+          </article>
+        </section>
+        <section class="overview-bottom-grid">
+          <article class="panel overview-subject-panel">
+            <header><b>结算对象概览</b><small>最近 {{ overviewSubjects.length }} 个对象</small></header>
+            <div class="overview-subject-table">
+              <div v-for="item in overviewSubjects.slice(0, 6)" :key="String(item.accountId || item.id)" class="overview-subject-row">
+                <span><b>{{ item.subjectName || item.accountName }}</b><small>{{ item.contractName || item.contractNo || item.orgName || '—' }}</small></span>
+                <em :class="['status', tone(item.jobStatus)]">{{ statusText(item.jobStatus) }}</em>
+                <strong>{{ item.readinessScore || 0 }}%</strong>
               </div>
-              <div>
-                <dt>可关账账期</dt>
-                <dd>{{ summary.closeablePeriods || 0 }}</dd>
+              <p v-if="!overviewSubjects.length" class="empty">暂无结算对象。</p>
+            </div>
+          </article>
+          <article class="panel overview-event-panel">
+            <header><b>最新业务动态</b><small>账单、收款和归档事件</small></header>
+            <div class="overview-event-list">
+              <div v-for="item in overviewEvents.slice(0, 6)" :key="String(item.id || item.eventTime || item.event_time)" class="overview-event-row">
+                <span><b>{{ item.title || item.eventType || item.event_type || '业务事件' }}</b><small>{{ item.detail || item.remark || item.accountName || item.account_name || '—' }}</small></span>
+                <time>{{ dateText(item.eventTime || item.event_time || item.createTime || item.create_time, true) }}</time>
               </div>
-            </dl>
+              <p v-if="!overviewEvents.length" class="empty">暂无业务动态。</p>
+            </div>
           </article>
         </section></template
       >
@@ -5170,6 +5232,210 @@ watch(
   margin: 8px 0 5px;
   font-size: 25px;
 }
+.business-overview-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.8fr) minmax(240px, 0.7fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.business-overview-hero article {
+  min-height: 142px;
+  padding: 18px;
+  border: 1px solid #dde6ec;
+  border-radius: 8px;
+  background: #fff;
+}
+.overview-command-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+.overview-command-panel span,
+.overview-health-panel span,
+.overview-cash-panel span {
+  display: block;
+  color: #6f7f8c;
+  font-size: 12px;
+}
+.overview-command-panel strong {
+  display: block;
+  margin: 10px 0 5px;
+  color: #1f3d54;
+  font-size: 32px;
+  line-height: 1.1;
+}
+.overview-command-panel small,
+.overview-health-panel small,
+.overview-cash-panel small {
+  color: #8794a0;
+}
+.overview-ring {
+  width: 96px;
+  height: 96px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, #fff 0 58%, transparent 59%),
+    conic-gradient(#397b9e var(--rate), #e9eef2 0);
+  color: #254a63;
+}
+.overview-ring b,
+.overview-ring small {
+  grid-area: 1 / 1;
+}
+.overview-ring b {
+  align-self: center;
+  margin-bottom: 14px;
+  font-size: 20px;
+}
+.overview-ring small {
+  align-self: center;
+  margin-top: 30px;
+  font-size: 11px;
+}
+.overview-health-panel,
+.overview-cash-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.overview-health-panel strong,
+.overview-cash-panel strong {
+  display: block;
+  margin: 8px 0 5px;
+  color: #244157;
+  font-size: 30px;
+  line-height: 1.15;
+}
+.overview-health-panel i {
+  height: 7px;
+  margin-top: 14px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #edf2f5;
+}
+.overview-health-panel i b {
+  display: block;
+  height: 100%;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #6e9b8a, #397b9e);
+}
+.overview-metric-grid {
+  margin-bottom: 12px;
+}
+.overview-process-grid,
+.overview-bottom-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.overview-work-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.overview-stage-list,
+.overview-risk-list,
+.overview-event-list,
+.overview-subject-table {
+  display: grid;
+}
+.overview-stage-row {
+  display: grid;
+  grid-template-columns: 160px minmax(120px, 1fr) 48px;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid #edf1f4;
+}
+.overview-stage-row span b,
+.overview-risk-row b,
+.overview-subject-row b,
+.overview-event-row b {
+  display: block;
+  color: #304b60;
+}
+.overview-stage-row span small,
+.overview-risk-row small,
+.overview-subject-row small,
+.overview-event-row small {
+  display: block;
+  margin-top: 4px;
+  color: #8794a0;
+  font-size: 12px;
+}
+.overview-stage-row i {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #edf2f5;
+}
+.overview-stage-row i b {
+  display: block;
+  height: 100%;
+  border-radius: 8px;
+  background: #397b9e;
+}
+.overview-stage-row strong {
+  text-align: right;
+  color: #526471;
+}
+.overview-amount-stack {
+  display: flex;
+  height: 14px;
+  margin: 18px;
+  overflow: hidden;
+  border-radius: 14px;
+  background: #edf2f5;
+}
+.overview-amount-stack span {
+  min-width: 2px;
+}
+.overview-amount-stack .paid {
+  background: #6e9b8a;
+}
+.overview-amount-stack .unpaid {
+  background: #b47e43;
+}
+.overview-amount-list {
+  padding-top: 0;
+}
+.overview-risk-row,
+.overview-subject-row,
+.overview-event-row {
+  display: grid;
+  align-items: center;
+  gap: 12px;
+  min-height: 58px;
+  padding: 12px 18px;
+  border-bottom: 1px solid #edf1f4;
+}
+.overview-risk-row {
+  grid-template-columns: minmax(0, 1fr) 112px;
+}
+.overview-risk-row strong {
+  text-align: right;
+  color: #9a6238;
+}
+.overview-subject-row {
+  grid-template-columns: minmax(0, 1fr) 90px 54px;
+}
+.overview-subject-row > strong {
+  text-align: right;
+  color: #397b9e;
+}
+.overview-event-row {
+  grid-template-columns: minmax(0, 1fr) 132px;
+}
+.overview-event-row time {
+  color: #8794a0;
+  font-size: 12px;
+  text-align: right;
+}
 .overview-charts {
   display: grid;
   grid-template-columns: 1.2fr 0.8fr;
@@ -5279,7 +5545,35 @@ watch(
   color: #8794a0;
 }
 .todo-row strong {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
   color: #71808b;
+}
+.todo-row strong em {
+  color: #71808b;
+  font-style: normal;
+}
+.todo-row strong small {
+  display: inline-block;
+  padding: 3px 8px;
+  border: 1px solid #d6e5ed;
+  border-radius: 999px;
+  background: #f7fbfd;
+  color: #39728e;
+  font-size: 11px;
+}
+.todo-row:hover {
+  background: #f9fcfe;
+}
+.overview-todo-flow {
+  margin: 12px 18px 16px;
+  padding: 10px 12px;
+  border: 1px solid #dce8ef;
+  border-radius: 8px;
+  background: #f8fbfd;
+  color: #5c7180;
+  font-size: 12px;
 }
 .summary-list {
   margin: 0;
@@ -5662,8 +5956,22 @@ watch(
     grid-template-columns: repeat(2, 1fr);
   }
   .overview-charts,
-  .overview-columns {
+  .overview-columns,
+  .business-overview-hero,
+  .overview-process-grid,
+  .overview-bottom-grid,
+  .overview-work-grid {
     grid-template-columns: 1fr;
+  }
+  .overview-stage-row,
+  .overview-subject-row,
+  .overview-event-row {
+    grid-template-columns: 1fr;
+    align-items: flex-start;
+  }
+  .overview-stage-row strong,
+  .overview-event-row time {
+    text-align: left;
   }
   .center-header {
     align-items: flex-start;

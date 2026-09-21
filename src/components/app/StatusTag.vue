@@ -1,13 +1,22 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { displayValue } from '@/utils/displayValue'
 const props = defineProps<{ domain: 'bill' | 'command' | 'alarm' | 'online' | 'parse' | 'enabled'; value: unknown }>()
 const state = computed(() => {
+  const raw = String(props.value ?? '').trim().toUpperCase()
   if (props.domain === 'alarm' && typeof props.value === 'string') {
     const alarmStates: Record<string, readonly [string, string]> = {
       NEW: ['新告警', 'danger'], ACKNOWLEDGED: ['已确认', 'warn'], IN_PROGRESS: ['处理中', 'blue'],
       RECOVERED: ['已恢复', 'success'], CLOSED: ['已关闭', 'muted'], FALSE_POSITIVE: ['误报', 'muted'], SUPPRESSED: ['已抑制', 'warn'],
     }
-    const item = alarmStates[props.value] || ['未知', 'muted']
+    const item = alarmStates[raw] || ['未知', 'muted']
+    return { text: item[0], tone: item[1] }
+  }
+  if (props.domain === 'online' && (raw === 'ONLINE' || raw === 'OFFLINE' || raw === 'UNKNOWN')) return { text: displayValue('online_status', props.value), tone: raw === 'ONLINE' ? 'success' : raw === 'OFFLINE' ? 'danger' : 'muted' }
+  if (props.domain === 'enabled' && ['ENABLED', 'DISABLED', 'ACTIVE', 'INACTIVE', 'TRUE', 'FALSE'].includes(raw)) return { text: displayValue('enabled', props.value), tone: ['ENABLED', 'ACTIVE', 'TRUE'].includes(raw) ? 'success' : 'muted' }
+  if (props.domain === 'command' && Number.isNaN(Number(props.value))) {
+    const commandStates: Record<string, readonly [string, string]> = { PENDING: ['待下发', 'warn'], PUBLISHED: ['已发布', 'blue'], SUCCESS: ['成功', 'success'], FAILED: ['失败', 'danger'], TIMEOUT: ['超时', 'danger'] }
+    const item = commandStates[raw] || [displayValue('status', props.value), 'muted']
     return { text: item[0], tone: item[1] }
   }
   const n = Number(props.value)

@@ -9,6 +9,7 @@ import DictionarySelectTree from '@/components/catalog/DictionarySelectTree.vue'
 import { catalogApplyProtocolTemplate, catalogAttributeTree, catalogClearModelImage, catalogCreate, catalogCreateVersion, catalogDeleteNode, catalogDeleteVersion, catalogLookups, catalogModel, catalogPointTree, catalogSaveAttributes, catalogSavePoints, catalogTree, catalogUpdateNode, catalogUpdateVersion, catalogUploadModelImage, catalogVersionAction, protocolVersion, publishedProtocolVersions } from '@/api/platform'
 import { useSessionStore } from '@/stores/session'
 import type { RecordRow } from '@/types/domain'
+import { displayValue } from '@/utils/displayValue'
 
 type TreeMode = 'products' | 'attributes'
 type DetailTab = 'basic' | 'attributes' | 'points' | 'devices'
@@ -922,7 +923,7 @@ onMounted(async () => { protocolOptions.value = await publishedProtocolVersions(
                       <small>{{ item.attribute_code }}</small><h4>{{ item.attribute_name }}</h4>
                       <AppSelect v-if="isDraft && canEdit" v-model="item.attribute_value_option_id" @change="item.attribute_value = optionsForAttribute(item.attribute_id).find((option) => String(option.id) === String(item.attribute_value_option_id))?.value_text || ''"><option value="">请选择固定值</option><option v-for="option in optionsForAttribute(item.attribute_id)" :key="String(option.id)" :value="option.id">{{ option.value_text }}</option></AppSelect>
                       <strong v-else>{{ item.attribute_value || item.default_value || '—' }}<em v-if="item.unit"> {{ item.unit }}</em></strong>
-                      <span>{{ Number(item.required) ? '必填属性' : '可选属性' }} · {{ item.usage_type || 'SPEC' }}</span>
+                      <span>{{ Number(item.required) ? '必填属性' : '可选属性' }} · {{ displayValue('usage_type', item.usage_type || 'SPEC', item) }}</span>
                       <button v-if="isDraft && canEdit" class="quiet danger-text table-action" @click="removeAttribute(attributeDrafts.indexOf(item))">移除</button>
                     </article>
                   </div>
@@ -946,11 +947,11 @@ onMounted(async () => { protocolOptions.value = await publishedProtocolVersions(
                   <div class="binding-group-title"><b>{{ group.name }}</b><small>{{ group.items.length }} 项</small></div>
                   <div class="realtime-point-grid">
                     <article v-for="item in group.items" :key="String(item.id || item.point_code)" class="realtime-point-card">
-                      <div class="realtime-point-card-head"><span>{{ item.point_code }}</span><small>{{ item.data_type }}<template v-if="item.unit"> · {{ item.unit }}</template></small></div>
+                      <div class="realtime-point-card-head"><span>{{ item.point_code }}</span><small>{{ displayValue('data_type', item.data_type, item) }}<template v-if="item.unit"> · {{ item.unit }}</template></small></div>
                       <h4>{{ item.point_name }}</h4>
                       <div class="point-card-form-row"><label>显示倍率<input v-if="isDraft && canEdit" v-model.number="item.display_factor" type="number" step="0.000001"><b v-else>{{ item.display_factor ?? 1 }}</b></label><label>显示单位<input v-if="isDraft && canEdit" v-model="item.display_unit"><b v-else>{{ item.display_unit || item.unit || '—' }}</b></label></div>
                       <label class="point-card-path">协议字段<AppSelect v-if="isDraft && canEdit" v-model="item.protocol_field_id"><option value="">请选择厂家协议字段</option><option v-for="field in protocolFields" :key="String(field.id)" :value="field.id">{{field.field_name}} · {{field.document_address||field.field_code}}</option></AppSelect><b v-else>{{item.field_name||item.field_code||'—'}}</b></label>
-                      <div class="realtime-point-meta"><span>{{ item.business_role || 'INSTANT_VALUE' }}</span><button v-if="isDraft && canEdit" class="quiet danger-text table-action" @click="removePoint(pointDrafts.indexOf(item))">移除</button></div>
+                      <div class="realtime-point-meta"><span>{{ displayValue('business_role', item.business_role || 'INSTANT_VALUE', item) }}</span><button v-if="isDraft && canEdit" class="quiet danger-text table-action" @click="removePoint(pointDrafts.indexOf(item))">移除</button></div>
                     </article>
                   </div>
                   </section>
@@ -960,7 +961,7 @@ onMounted(async () => { protocolOptions.value = await publishedProtocolVersions(
               <button v-if="isDraft && canEdit" class="primary catalog-save" :disabled="saving" @click="savePoints"><Save :size="14" />保存测点</button>
             </section>
 
-            <section v-else class="panel catalog-tab-panel"><div class="panel-head"><h3>引用设备</h3><small>{{ devices.length }} 台</small></div><div class="template-filter-bar"><label class="catalog-search template-search"><Search :size="14" /><input v-model.trim="referencedDeviceKeyword" placeholder="搜索设备 SN、名称、网关或通道"></label><AppSelect v-model="referencedDeviceOrgFilter"><option value="">全部组织</option><option v-for="org in referencedDeviceOrgOptions" :key="org" :value="org">{{ org }}</option></AppSelect><AppSelect v-model="referencedDeviceStatusFilter"><option value="">全部状态</option><option v-for="status in referencedDeviceStatusOptions" :key="status" :value="status">{{ status }}</option></AppSelect></div><div class="catalog-table template-scroll"><table><thead><tr><th>设备 SN</th><th>名称</th><th>组织</th><th>网关</th><th>通道</th><th>从站 ID</th><th>状态</th></tr></thead><tbody><tr v-for="item in filteredReferencedDevices" :key="String(item.id)"><td>{{ item.device_sn }}</td><td>{{ item.device_name }}</td><td>{{ item.org_name || '—' }}</td><td>{{ item.gateway_name || item.gateway_sn || '未接入' }}</td><td>{{ item.channel_name || item.edge_channel_id || '未绑定' }}</td><td>{{ item.protocol_addr || '待填写' }}</td><td>{{ item.status }}</td></tr><tr v-if="!filteredReferencedDevices.length"><td colspan="7" class="empty-cell">暂无符合条件的引用设备</td></tr></tbody></table></div></section>
+            <section v-else class="panel catalog-tab-panel"><div class="panel-head"><h3>引用设备</h3><small>{{ devices.length }} 台</small></div><div class="template-filter-bar"><label class="catalog-search template-search"><Search :size="14" /><input v-model.trim="referencedDeviceKeyword" placeholder="搜索设备 SN、名称、网关或通道"></label><AppSelect v-model="referencedDeviceOrgFilter"><option value="">全部组织</option><option v-for="org in referencedDeviceOrgOptions" :key="org" :value="org">{{ org }}</option></AppSelect><AppSelect v-model="referencedDeviceStatusFilter"><option value="">全部状态</option><option v-for="status in referencedDeviceStatusOptions" :key="status" :value="status">{{ displayValue('status', status) }}</option></AppSelect></div><div class="catalog-table template-scroll"><table><thead><tr><th>设备 SN</th><th>名称</th><th>组织</th><th>网关</th><th>通道</th><th>从站 ID</th><th>状态</th></tr></thead><tbody><tr v-for="item in filteredReferencedDevices" :key="String(item.id)"><td>{{ item.device_sn }}</td><td>{{ item.device_name }}</td><td>{{ item.org_name || '—' }}</td><td>{{ item.gateway_name || item.gateway_sn || '未接入' }}</td><td>{{ item.channel_name || item.edge_channel_id || '未绑定' }}</td><td>{{ item.protocol_addr || '待填写' }}</td><td>{{ displayValue('status', item.status, item) }}</td></tr><tr v-if="!filteredReferencedDevices.length"><td colspan="7" class="empty-cell">暂无符合条件的引用设备</td></tr></tbody></table></div></section>
           </div>
         </template>
         <div v-else class="catalog-empty"><p class="eyebrow">CATALOG NAVIGATION</p><h2>{{ selected?.label || '请选择产品型号' }}</h2><p v-if="treeMode === 'products'">从左侧展开设备分类、品牌和系列，选择具体型号后配置版本、属性、测点和协议。</p><p v-else>属性字典按分类树维护。选择属性节点可查看定义，新增属性时会自动使用当前属性组。</p></div>
