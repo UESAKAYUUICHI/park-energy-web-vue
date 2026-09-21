@@ -95,9 +95,9 @@ function createEmptyPageData(page: EfficiencyPageKind): ThreePhaseMonitorData | 
 
 const selectedDevice = computed(() => devices.value.find((item) => String(item.id) === deviceId.value))
 const contextHint = computed(() => selectedDevice.value ? `${selectedDevice.value.device_name} · ${selectedDevice.value.device_sn}` : '全部授权设备')
-const pageTitle = computed(() => props.page === 'three-phase-monitor' ? '三相工况实时监测' : props.page === 'power-efficiency-analysis' ? '功率与能效分析' : props.page === 'energy-consume-statistics' ? '能耗统计分析' : '数据分析-模型预测分析')
-const pageSubTitle = computed(() => props.page === 'three-phase-monitor' ? '三相平衡、电压电流越限、电网频率质量' : props.page === 'power-efficiency-analysis' ? '功率因数、无功损耗、负载率' : props.page === 'energy-consume-statistics' ? '日周月能耗、峰谷波动、累计趋势' : '模型仿真预测与风险推演')
-const periodLabel = computed(() => props.page === 'three-phase-monitor' ? '监测时段' : props.page === 'power-efficiency-analysis' ? '分析时段' : props.page === 'energy-consume-statistics' ? '统计区间' : '预测基准区间')
+const pageTitle = computed(() => props.page === 'three-phase-monitor' ? '三相工况实时监测' : props.page === 'power-efficiency-analysis' ? '功率与能效分析' : '能耗统计分析')
+const pageSubTitle = computed(() => props.page === 'three-phase-monitor' ? '三相平衡、电压电流越限、电网频率质量' : props.page === 'power-efficiency-analysis' ? '功率因数、无功损耗、负载率' : '日周月能耗、峰谷波动、累计趋势')
+const periodLabel = computed(() => props.page === 'three-phase-monitor' ? '监测时段' : props.page === 'power-efficiency-analysis' ? '分析时段' : '统计区间')
 const periodHint = computed(() => '')
 
 const normalizedData = computed(() => pageData.value)
@@ -106,7 +106,6 @@ const events = computed(() => rowsOf(normalizedData.value.events))
 const isThreePhase = computed(() => props.page === 'three-phase-monitor')
 const isAnalysis = computed(() => props.page === 'power-efficiency-analysis')
 const isStatistics = computed(() => props.page === 'energy-consume-statistics')
-const isPredict = computed(() => props.page === 'data-model-predict')
 
 const threePhase = computed(() => normalizedData.value as ThreePhaseMonitorData)
 const analysis = computed(() => normalizedData.value as PowerEfficiencyAnalysisData)
@@ -335,7 +334,7 @@ async function load() {
 }
 
 function refresh() { void load() }
-function reset() { deviceId.value = '101'; startDate.value = daysAgo(29); endDate.value = today(); if (props.page === 'three-phase-monitor') timeGranularity.value = '1h'; if (props.page === 'data-model-predict') { forecastWindow.value = '24h'; riskMode.value = 'standard'; loadPerturbation.value = 1.0 } void load() }
+function reset() { deviceId.value = '101'; startDate.value = daysAgo(29); endDate.value = today(); if (props.page === 'three-phase-monitor') timeGranularity.value = '1h'; void load() }
 function jumpTo(page: EfficiencyPageKind) { if (page === props.page) return; emit('switch-page', page) }
 
 watch(() => props.page, (page) => { disposeCharts(); pageData.value = createEmptyPageData(page); void load() })
@@ -375,7 +374,6 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
             <button :class="{ active: isThreePhase }" @click="jumpTo('three-phase-monitor')">三相监测</button>
             <button :class="{ active: isAnalysis }" @click="jumpTo('power-efficiency-analysis')">功率分析</button>
             <button :class="{ active: isStatistics }" @click="jumpTo('energy-consume-statistics')">能耗统计</button>
-            <button :class="{ active: isPredict }" @click="jumpTo('data-model-predict')">模型预测</button>
           </div>
         </div>
 

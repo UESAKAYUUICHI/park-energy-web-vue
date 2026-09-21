@@ -229,11 +229,15 @@ const deviceName = (value: unknown): string => {
     ? String(device.device_name || device.device_sn || value)
     : String(value ?? "—");
 };
+const alarmObjectLabel = (_value: unknown, row: RecordRow): string =>
+  String(row.device_name || row.device_sn || row.source_gateway_name || row.source_gateway_sn || "—");
+const alarmPointLabel = (_value: unknown, row: RecordRow): string =>
+  String(row.point_name || row.point_code || (String(row.source_event_id || "").startsWith("GATEWAY_OFFLINE:") ? "网关在线状态" : "—"));
 const eventColumns: TableColumn[] = [
   { key: "org_name", label: "所属组织" },
-  { key: "device_name", label: "告警设备" },
+  { key: "device_name", label: "告警设备", format: alarmObjectLabel },
   { key: "alarm_type", label: "告警类型", format: alarmTypeLabel },
-  { key: "point_code", label: "触发测点" },
+  { key: "point_name", label: "触发测点", format: alarmPointLabel },
   { key: "alarm_level", label: "等级", format: alarmLevelLabel },
   { key: "event_status", label: "事件状态" },
   { key: "occurrence_count", label: "触发次数" },
@@ -309,9 +313,9 @@ const detailItems = computed(() =>
         ["所属组织", selected.value.org_name || selected.value.org_id || "—"],
         [
           "告警设备",
-          selected.value.device_name || selected.value.device_sn || "—",
+          alarmObjectLabel(null, selected.value),
         ],
-        ["触发测点", selected.value.point_code || "—"],
+        ["触发测点", alarmPointLabel(null, selected.value)],
         ["告警类型", alarmTypeLabel(selected.value.alarm_type)],
         ["告警等级", alarmLevelLabel(selected.value.alarm_level)],
         [
@@ -358,7 +362,7 @@ const essentialDetailItems = computed(() =>
     ? [
         [
           "告警设备",
-          selected.value.device_name || selected.value.device_sn || "—",
+          alarmObjectLabel(null, selected.value),
         ],
         ["告警类型", alarmTypeLabel(selected.value.alarm_type)],
         ["告警等级", alarmLevelLabel(selected.value.alarm_level)],
@@ -372,7 +376,7 @@ const essentialDetailItems = computed(() =>
           "设备条件",
           selected.value.condition_status === "CLEARED" ? "已恢复" : "仍在异常",
         ],
-        ["触发测点", selected.value.point_code || "—"],
+        ["触发测点", alarmPointLabel(null, selected.value)],
         [
           "触发值 / 阈值",
           `${selected.value.alarm_value ?? "—"} / ${selected.value.threshold_value ?? "—"}`,
@@ -760,15 +764,15 @@ function goDevice(row: RecordRow | null = selected.value) {
 function goCommands(row: RecordRow | null = selected.value) {
   const id = row?.device_id || deviceId.value;
   if (id)
-    router.push({ path: "/access/commands", query: { targetId: String(id) } });
+    router.push({ path: "/access/control", query: { targetId: String(id) } });
 }
 function goEnergy(row: RecordRow | null = selected.value) {
   const id = row?.device_id || deviceId.value;
   const point = row?.point_code;
   if (id)
     router.push({
-      path: "/monitor/realtime",
-      query: { deviceId: String(id), pointCode: point ? String(point) : "" },
+      path: "/power-efficiency",
+      query: { tab: "three-phase-monitor", deviceId: String(id), pointCode: point ? String(point) : "" },
     });
 }
 
@@ -810,6 +814,14 @@ onMounted(() => {
         <h1>{{ title }}</h1>
       </div>
     </header>
+
+    <div v-if="mode === 'alarm-rules'" class="legacy-alarm-notice">
+      <div>
+        <strong>这是历史告警策略页面</strong>
+        <span>新告警请使用告警协议：协议绑定设备和测点，每个设备测点只维护一条生效告警，不自动创建工单。</span>
+      </div>
+      <button class="quiet" type="button" @click="router.push('/alarms/protocols')">进入告警协议</button>
+    </div>
 
     <template v-if="mode !== 'alarm-rules'">
       <article class="filter-card alarm-top-filter">
@@ -1123,7 +1135,7 @@ onMounted(() => {
         </button>
         <button class="quiet" @click="goDevice()">设备档案</button
         ><button class="quiet" @click="goEnergy()">实时监控</button
-        ><button class="quiet" @click="goCommands()">指令追踪</button
+        ><button class="quiet" @click="goCommands()">设备控制台</button
         ><button
           v-if="
             selected &&
@@ -1708,6 +1720,12 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.legacy-alarm-notice{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:-3px 0 14px;padding:11px 13px;border:1px solid #ead9b8;border-radius:8px;background:#fffaf0;color:#6f5a31}
+.legacy-alarm-notice strong,.legacy-alarm-notice span{display:block}
+.legacy-alarm-notice strong{font-size:12px;color:#76591f}
+.legacy-alarm-notice span{margin-top:4px;font-size:11px;line-height:1.5}
+.legacy-alarm-notice .quiet{flex:none}
+@media(max-width:720px){.legacy-alarm-notice{align-items:stretch;flex-direction:column}.legacy-alarm-notice .quiet{align-self:flex-start}}
 .strategy-toolbar-actions{display:flex;align-items:end;gap:8px;margin-left:auto;flex-wrap:nowrap;white-space:nowrap}
 .enterprise-main:has(.strategy-compact-table){min-height:0;height:100%;display:flex;flex-direction:column}
 .strategy-compact-table{flex:1;min-height:0}

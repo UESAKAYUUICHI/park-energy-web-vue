@@ -24,6 +24,7 @@ const lookups = ref<RecordRow>({});
 const validateOpen = ref(false);
 const validateResult = ref<RecordRow | null>(null);
 const editMode = ref(false);
+const detailMode = ref(false);
 const createOpen = ref(false),
   createForm = reactive({
     profileCode: "",
@@ -40,6 +41,7 @@ const version = computed(() => (detail.value.version as RecordRow) || {}),
   commands = computed(() => (detail.value.commands as RecordRow[]) || []);
 const editable = computed(() => String(version.value.status) === "DRAFT");
 const isEditing = computed(() => editable.value && editMode.value);
+const showConfigTables = computed(() => isEditing.value || detailMode.value);
 const cyclicBlocks = computed(() => blocks.value.filter((item) => String(item.pollMode || item.poll_mode || "CYCLIC") === "CYCLIC").length);
 const validateErrors = computed(() => Array.isArray(validateResult.value?.errors) ? validateResult.value?.errors as string[] : []);
 const attributeOptions = computed(() => Array.isArray(lookups.value.attributes) ? lookups.value.attributes as RecordRow[] : []);
@@ -213,6 +215,7 @@ async function load() {
 }
 async function select(row: RecordRow) {
   editMode.value = false;
+  detailMode.value = false;
   selectedId.value = row.current_version_id;
   detail.value = normalizeDetail(await protocolVersion(selectedId.value));
 }
@@ -224,11 +227,8 @@ async function createNextVersion() {
   detail.value = normalizeDetail(result);
   selectedId.value = (result.version as RecordRow).id;
   editMode.value = true;
+  detailMode.value = false;
   await load();
-}
-async function cancelEdit() {
-  editMode.value = false;
-  if (selectedId.value) detail.value = normalizeDetail(await protocolVersion(selectedId.value));
 }
 function addBlock() {
   blocks.value.push({
@@ -296,6 +296,7 @@ async function save() {
       }),
     );
     editMode.value = false;
+    detailMode.value = false;
   } finally {
     busy.value = false;
   }
@@ -315,6 +316,7 @@ async function publish() {
   if (!confirm("发布后该协议版本将不可编辑，确认发布？"))
     return;
   detail.value = await publishProtocolVersion(selectedId.value);
+  detailMode.value = false;
   await load();
 }
 async function create() {
@@ -385,11 +387,13 @@ onMounted(load);
           </div>
           <div class="actions">
             <button v-if="!editable" @click="createNextVersion">
-              <Plus :size="15" />新建版本
+              <Plus :size="15" />修改版本
             </button>
             <button @click="runValidate(true)">校验</button
             ><button v-if="editable && !editMode" @click="editMode = true">编辑</button
-            ><button v-if="isEditing" @click="cancelEdit">取消</button
+            ><button v-if="!isEditing" @click="detailMode = !detailMode">
+              {{ detailMode ? "收起详情" : "查看详情" }}
+            </button
             ><button v-if="isEditing" @click="save">
               <Save :size="15" />保存</button
             ><button v-if="editable && !editMode" class="primary" @click="publish">
@@ -405,7 +409,7 @@ onMounted(load);
               <Plus :size="14" />新增
             </button>
           </div>
-          <table v-if="isEditing">
+          <table v-if="showConfigTables">
             <thead>
               <tr>
                 <th>全域属性</th>
@@ -417,7 +421,7 @@ onMounted(load);
             <tbody>
               <tr v-for="(item, i) in protocolAttributes" :key="String(item.id || i)">
                 <td>
-                  <select v-model="item.attributeId" :disabled="!editable" @change="syncAttributeName(item)">
+                  <select v-model="item.attributeId" :disabled="!isEditing" @change="syncAttributeName(item)">
                     <option value="">请选择已有全域属性</option>
                     <option v-for="attribute in attributeOptions" :key="String(attribute.id)" :value="attribute.id">
                       {{ attribute.attribute_name }} · {{ attribute.attribute_code }}
@@ -425,16 +429,16 @@ onMounted(load);
                   </select>
                 </td>
                 <td>
-                  <select v-if="optionsForAttribute(item.attributeId || item.attribute_id).length" v-model="item.attributeValueOptionId" :disabled="!editable" @change="syncAttributeValue(item)">
+                  <select v-if="optionsForAttribute(item.attributeId || item.attribute_id).length" v-model="item.attributeValueOptionId" :disabled="!isEditing" @change="syncAttributeValue(item)">
                     <option value="">请选择固定值</option>
                     <option v-for="option in optionsForAttribute(item.attributeId || item.attribute_id)" :key="String(option.id)" :value="option.id">
                       {{ option.value_text }}
                     </option>
                   </select>
-                  <input v-else v-model="item.attributeValue" :disabled="!editable" placeholder="默认值，可留空" />
+                  <input v-else v-model="item.attributeValue" :disabled="!isEditing" placeholder="默认值，可留空" />
                 </td>
                 <td>
-                  <select v-model.number="item.required" :disabled="!editable">
+                  <select v-model.number="item.required" :disabled="!isEditing">
                     <option :value="0">可选</option>
                     <option :value="1">必填</option>
                   </select>
@@ -470,13 +474,13 @@ onMounted(load);
           </div>
           <div class="read-block-list">
             <article v-for="(block, i) in blocks" :key="String(block.id || i)" class="read-block-card">
-              <div v-if="isEditing" class="read-block-form">
-                <label><span>读块编码</span><input v-model="block.blockCode" :disabled="!editable" :placeholder="String(block.block_code || '编码')" /></label>
-                <label><span>读块名称</span><input v-model="block.blockName" :disabled="!editable" :placeholder="String(block.block_name || '名称')" /></label>
-                <label><span>功能码</span><select v-model.number="block.functionCode" :disabled="!editable"><option :value="3">03</option><option :value="4">04</option></select></label>
-                <label><span>起始地址（0 基）</span><input v-model.number="block.startAddress" type="number" :disabled="!editable" :placeholder="String(block.start_address ?? 0)" /></label>
-                <label><span>寄存器数</span><input v-model.number="block.registerCount" type="number" :disabled="!editable" :placeholder="String(block.register_count ?? 1)" /></label>
-                <label><span>采集方式</span><select v-model="block.pollMode" :disabled="!editable"><option>CYCLIC</option><option>ON_DEMAND</option></select></label>
+              <div v-if="showConfigTables" class="read-block-form">
+                <label><span>读块编码</span><input v-model="block.blockCode" :disabled="!isEditing" :placeholder="String(block.block_code || '编码')" /></label>
+                <label><span>读块名称</span><input v-model="block.blockName" :disabled="!isEditing" :placeholder="String(block.block_name || '名称')" /></label>
+                <label><span>功能码</span><select v-model.number="block.functionCode" :disabled="!isEditing"><option :value="3">03</option><option :value="4">04</option></select></label>
+                <label><span>起始地址（0 基）</span><input v-model.number="block.startAddress" type="number" :disabled="!isEditing" :placeholder="String(block.start_address ?? 0)" /></label>
+                <label><span>寄存器数</span><input v-model.number="block.registerCount" type="number" :disabled="!isEditing" :placeholder="String(block.register_count ?? 1)" /></label>
+                <label><span>采集方式</span><select v-model="block.pollMode" :disabled="!isEditing"><option>CYCLIC</option><option>ON_DEMAND</option></select></label>
                 <button title="删除读块" @click="blocks.splice(i, 1)"><Trash2 :size="14" /></button>
               </div>
               <div v-else class="read-block-view tree-node branch">
@@ -493,7 +497,7 @@ onMounted(load);
                 <b>测点映射</b><small>{{ fieldsForBlock(block).length }} 项</small>
                 <button v-if="isEditing" @click="addField(block)"><Plus :size="14" />新增子行</button>
               </div>
-              <table v-if="isEditing" class="field-table">
+              <table v-if="showConfigTables" class="field-table">
                 <thead>
                   <tr>
                     <th>映射终端点位</th>
@@ -508,18 +512,18 @@ onMounted(load);
                 <tbody>
                   <tr v-for="field in fieldsForBlock(block)" :key="String(field.id || field.fieldCode)">
                     <td>
-                      <select v-model="field.standardPointId" :disabled="!editable" @change="syncFieldPoint(field)">
+                      <select v-model="field.standardPointId" :disabled="!isEditing" @change="syncFieldPoint(field)">
                         <option value="">不生成产品测点</option>
                         <option v-for="point in pointOptions" :key="String(point.id)" :value="point.id">
                           {{ point.point_name }} · {{ point.point_code }}
                         </option>
                       </select>
                     </td>
-                    <td><input v-model="field.documentAddress" :disabled="!editable" :placeholder="String(field.document_address || '0x0000')" /></td>
-                    <td><div class="pair"><input v-model.number="field.registerOffset" type="number" :disabled="!editable" :placeholder="String(field.register_offset ?? 0)" /><input v-model.number="field.registerLength" type="number" :disabled="!editable" :placeholder="String(field.register_length ?? 1)" /></div></td>
-                    <td><div class="pair"><select v-model="field.valueType" :disabled="!editable"><option>UINT16</option><option>INT16</option><option>UINT32</option><option>INT32</option><option>FLOAT32</option><option>BOOLEAN</option></select><select v-model="field.byteOrder" :disabled="!editable"><option>AB</option><option>BA</option><option>ABCD</option><option>BADC</option><option>CDAB</option><option>DCBA</option></select></div></td>
-                    <td><input v-model.number="field.bitOffset" type="number" :disabled="!editable" placeholder="非位域留空" /></td>
-                    <td><input v-model.number="field.decodeFactor" type="number" step="0.000001" :disabled="!editable" :placeholder="String(field.decode_factor ?? 1)" /></td>
+                    <td><input v-model="field.documentAddress" :disabled="!isEditing" :placeholder="String(field.document_address || '0x0000')" /></td>
+                    <td><div class="pair"><input v-model.number="field.registerOffset" type="number" :disabled="!isEditing" :placeholder="String(field.register_offset ?? 0)" /><input v-model.number="field.registerLength" type="number" :disabled="!isEditing" :placeholder="String(field.register_length ?? 1)" /></div></td>
+                    <td><div class="pair"><select v-model="field.valueType" :disabled="!isEditing"><option>UINT16</option><option>INT16</option><option>UINT32</option><option>INT32</option><option>FLOAT32</option><option>BOOLEAN</option></select><select v-model="field.byteOrder" :disabled="!isEditing"><option>AB</option><option>BA</option><option>ABCD</option><option>BADC</option><option>CDAB</option><option>DCBA</option></select></div></td>
+                    <td><input v-model.number="field.bitOffset" type="number" :disabled="!isEditing" placeholder="非位域留空" /></td>
+                    <td><input v-model.number="field.decodeFactor" type="number" step="0.000001" :disabled="!isEditing" :placeholder="String(field.decode_factor ?? 1)" /></td>
                     <td><button title="删除子行" @click="removeField(field)"><Trash2 :size="14" /></button></td>
                   </tr>
                   <tr v-if="!fieldsForBlock(block).length">
@@ -551,7 +555,7 @@ onMounted(load);
               <Plus :size="14" />新增
             </button>
           </div>
-          <table v-if="isEditing">
+          <table v-if="showConfigTables">
             <thead>
               <tr>
                 <th>命令编码 / 名称</th>
@@ -567,18 +571,18 @@ onMounted(load);
                 <td>
                   <input
                     v-model="item.commandCode"
-                    :disabled="!editable"
+                    :disabled="!isEditing"
                     :placeholder="String(item.command_code || '编码')"
                   /><input
                     v-model="item.commandName"
-                    :disabled="!editable"
+                    :disabled="!isEditing"
                     :placeholder="String(item.command_name || '名称')"
                   />
                 </td>
                 <td>
                   <select
                     v-model.number="item.functionCode"
-                    :disabled="!editable"
+                    :disabled="!isEditing"
                   >
                     <option :value="6">06</option>
                   </select>
@@ -587,12 +591,12 @@ onMounted(load);
                   <input
                     v-model.number="item.registerAddress"
                     type="number"
-                    :disabled="!editable"
+                    :disabled="!isEditing"
                     :placeholder="String(item.register_address ?? 0)"
                   />
                 </td>
                 <td>
-                  <select v-model="item.encodeType" :disabled="!editable">
+                  <select v-model="item.encodeType" :disabled="!isEditing">
                     <option>FIXED</option>
                     <option>DIRECT</option>
                     <option>BITMASK_SET</option>
@@ -603,7 +607,7 @@ onMounted(load);
                   <input
                     v-model.number="item.fixedValue"
                     type="number"
-                    :disabled="!editable"
+                    :disabled="!isEditing"
                     :placeholder="String(item.fixed_value ?? 0)"
                   />
                 </td>
@@ -657,18 +661,25 @@ onMounted(load);
       v-model:open="validateOpen"
       title="协议校验结果"
       :show-footer="false"
+      dialog-class="protocol-validate-dialog"
     >
-      <div class="validate-dialog-body">
-        <strong :class="{ passed: validateResult?.valid }">
-          {{ validateResult?.valid ? "校验通过" : "校验未通过" }}
-        </strong>
-        <p>
-          读块 {{ validateResult?.readBlockCount ?? 0 }} 个，协议字段
-          {{ validateResult?.fieldCount ?? 0 }} 个。
-        </p>
-        <ul v-if="validateErrors.length">
+      <div class="validate-dialog-body" :class="{ passed: validateResult?.valid }">
+        <div class="validate-result-card">
+          <span class="validate-result-icon">{{ validateResult?.valid ? "✓" : "!" }}</span>
+          <div>
+            <strong :class="{ passed: validateResult?.valid }">
+              {{ validateResult?.valid ? "校验通过" : "校验未通过" }}
+            </strong>
+            <p>
+              读块 {{ validateResult?.readBlockCount ?? 0 }} 个，协议字段
+              {{ validateResult?.fieldCount ?? 0 }} 个。
+            </p>
+          </div>
+        </div>
+        <ul v-if="validateErrors.length" class="validate-error-list">
           <li v-for="error in validateErrors" :key="error">{{ error }}</li>
         </ul>
+        <p v-else class="validate-success-hint">当前协议结构完整，可以继续发布或同步到产品目录。</p>
       </div>
     </AppDialog>
   </section>
@@ -1090,28 +1101,79 @@ td > input + input {
 .protocol-card > table td:last-child {
   padding-right: 12px;
 }
+:deep(.protocol-validate-dialog) {
+  width: min(720px, calc(100vw - 42px));
+}
+:deep(.protocol-validate-dialog .dialog-content) {
+  background: #f7f9fc;
+}
 .validate-dialog-body {
   display: grid;
   gap: 12px;
-  padding: 4px;
+  padding: 18px 22px 22px;
+}
+.validate-result-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid #dbe7f5;
+  border-radius: 8px;
+  background: #fff;
+}
+.validate-dialog-body.passed .validate-result-card {
+  border-color: #c6e5d8;
+  background: #f6fbf8;
+}
+.validate-result-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: 8px;
+  background: #fff0ec;
+  color: #b94f2d;
+  font-weight: 700;
+  font-size: 18px;
+}
+.validate-dialog-body.passed .validate-result-icon {
+  background: #e9f8f1;
+  color: #17643d;
 }
 .validate-dialog-body strong {
+  display: block;
   color: #b94f2d;
-  font-size: 17px;
+  font-size: 18px;
+  line-height: 1.35;
 }
 .validate-dialog-body strong.passed {
   color: #17643d;
 }
 .validate-dialog-body p {
+  margin: 5px 0 0;
   color: #526b84;
-  font-size: 12px;
+  font-size: 13px;
 }
-.validate-dialog-body ul {
+.validate-error-list {
+  display: grid;
+  gap: 8px;
   margin: 0;
-  padding-left: 18px;
+  padding: 12px 14px 12px 30px;
+  border: 1px solid #f1c9bf;
+  border-radius: 8px;
+  background: #fff6f3;
   color: #b94f2d;
   font-size: 12px;
   line-height: 1.7;
+}
+.validate-success-hint {
+  margin: 0 !important;
+  padding: 12px 14px;
+  border: 1px solid #cae6d7;
+  border-radius: 8px;
+  background: #f7fcf9;
+  color: #3f7c62 !important;
 }
 @media (max-width: 800px) {
   .protocol-page > main {

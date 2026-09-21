@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Compon
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { routeRecords } from '@/router/routes'
 import { useSessionStore } from '@/stores/session'
-import { Activity, Archive, BadgeCheck, BarChart3, Bell, Boxes, Building2, Cable, ChartNoAxesCombined, CircleDollarSign, ClipboardCheck, Compass, Cpu, Crosshair, FileCheck2, FileClock, FileText, Gauge, GitFork, HardHat, History, KeyRound, LayoutDashboard, ListOrdered, LogOut, Menu, Network, RadioReceiver, ReceiptText, Router, ScrollText, Send, Settings2, ShieldCheck, Siren, SlidersHorizontal, Tags, UserCircle, Users, WalletCards, Wrench, Zap } from '@lucide/vue'
+import { Archive, BarChart3, Bell, Boxes, Building2, Cable, ChartNoAxesCombined, CircleDollarSign, ClipboardCheck, Compass, Cpu, Crosshair, FileCheck2, FileClock, Gauge, KeyRound, LayoutDashboard, LogOut, Menu, Network, RadioReceiver, ReceiptText, Router, Settings2, ShieldCheck, Siren, SlidersHorizontal, Tags, UserCircle, Users, Wrench } from '@lucide/vue'
 
 interface NavItem { name: string; path: string; title: string; permission?: string; icon: Component }
 interface NavGroup { key: string; label: string; icon: Component; items?: NavItem[]; sections?: Array<{ label: string; items: NavItem[] }>; forceCollapsible?: boolean }
@@ -36,23 +36,6 @@ const navIcons: Record<string, Component> = {
   'global-points': Crosshair,
   'power-efficiency': BarChart3,
   'alarms-events': Bell,
-  'billing-settlement': ReceiptText,
-  'billing-subjects': Users,
-  'billing-bills': FileText,
-  'billing-batches': FileClock,
-  'billing-collections': WalletCards,
-  'billing-adjustments': ReceiptText,
-  'billing-metering': Gauge,
-  'billing-tariffs': Zap,
-  'billing-contracts': FileText,
-  'billing-tenants': Users,
-  'billing-accounts': WalletCards,
-  'billing-rules': Settings2,
-  'billing-rule-scopes': GitFork,
-  'billing-price-items': ListOrdered,
-  'billing-pricing': SlidersHorizontal,
-  'billing-receivables': ReceiptText,
-  'billing-finance': WalletCards,
   'billing-overview': LayoutDashboard,
   'billing-rules-workspace': ClipboardCheck,
   'billing-payment-workspace': ReceiptText,
@@ -60,14 +43,11 @@ const navIcons: Record<string, Component> = {
   'access-diagnostic': RadioReceiver,
   'edge-config': Cable,
   'access-control': SlidersHorizontal,
-  'access-commands': Send,
-  'archive-orgs': Building2,
   'archive-spaces': Building2,
   'archive-gateways': Router,
-  'archive-devices': Cpu,
   'archive-device-types': Tags,
   'archive-point-definitions': Crosshair,
-  'alarms-rules': BadgeCheck,
+  'alarms-protocols': Siren,
   'operations-work-orders': Wrench,
   'system-users': Users,
   'system-tenants': Users,
@@ -80,6 +60,7 @@ const navIcons: Record<string, Component> = {
 const groupIcons: Record<string, Component> = {
   dashboard: Compass,
   assets: Archive,
+  catalog: Boxes,
   efficiency: BarChart3,
   operations: Wrench,
   access: RadioReceiver,
@@ -93,15 +74,13 @@ const item = (name: string): NavItem => {
 }
 const nav = computed<NavGroup[]>((): NavGroup[] => [
   { key: 'dashboard', label: '数据总览', icon: groupIcon('dashboard'), items: [item('dashboard'), item('energy-screen')] },
-  { key: 'assets', label: '组织和资产', icon: groupIcon('assets'), items: [item('device-archive-org-tree'), item('device-archive-devices'), item('product-catalog'), item('protocol-catalog'), item('global-attributes'), item('global-points')] },
+  { key: 'assets', label: '组织和资产', icon: groupIcon('assets'), items: [item('device-archive-org-tree'), item('device-archive-devices')] },
+  { key: 'catalog', label: '模型与字典', icon: groupIcon('catalog'), items: [item('product-catalog'), item('protocol-catalog'), item('global-attributes'), item('global-points')] },
   { key: 'efficiency', label: '能效与分析', icon: groupIcon('efficiency'), items: [item('power-efficiency')], forceCollapsible: true },
-  { key: 'operations', label: '告警与运维', icon: groupIcon('operations'), items: [item('alarms-events'), item('operations-work-orders'), item('alarms-rules')] },
-  { key: 'access', label: '设备接入', icon: groupIcon('access'), items: [item('access-diagnostic'), item('edge-config'), item('access-control'), item('access-commands')] },
+  { key: 'operations', label: '告警与运维', icon: groupIcon('operations'), items: [item('alarms-events'), item('alarms-protocols'), item('operations-work-orders')] },
+  { key: 'access', label: '设备接入', icon: groupIcon('access'), items: [item('access-diagnostic'), item('edge-config'), item('access-control')] },
   { key: 'billing', label: '结算与财务', icon: groupIcon('revenue'), items: [item('billing-overview'), item('billing-rules-workspace'), item('billing-payment-workspace'), item('billing-archive-workspace')] },
-  { key: 'system', label: '系统治理', icon: groupIcon('system'), sections: [
-    { label: '基础档案', items: isAdmin.value ? [item('archive-orgs'), item('archive-spaces'), item('archive-gateways'), item('archive-devices'), item('archive-device-types'), item('archive-point-definitions')] : [] },
-    { label: '权限与审计', items: isAdmin.value ? [item('system-users'), item('system-tenants'), item('system-roles'), item('system-permissions'), item('system-rbac-workbench'), item('system-user-org-bindings'), item('system-audit')] : [item('system-rbac-workbench'), item('system-audit')] },
-  ] },
+  { key: 'system', label: '系统治理', icon: groupIcon('system'), items: isAdmin.value ? [item('archive-spaces'), item('archive-gateways'), item('archive-device-types'), item('archive-point-definitions'), item('system-tenants'), item('system-users'), item('system-roles'), item('system-permissions'), item('system-rbac-workbench'), item('system-user-org-bindings'), item('system-audit')] : [item('system-rbac-workbench'), item('system-audit')] },
 ])
 const visible = (entry: NavItem) => session.can(entry.permission)
 const isSimpleGroup = (group: NavGroup) => Boolean(group.items && group.items.length === 1 && !group.forceCollapsible)
@@ -112,7 +91,33 @@ const mobileTabs = computed(() => [
   item('operations-work-orders'),
   item('billing-overview'),
 ])
-const toggle = (key: string) => { openGroups.value = openGroups.value.includes(key) ? openGroups.value.filter((item) => item !== key) : [...openGroups.value, key] }
+const entryMatchesRoute = (entry: NavItem) => {
+  const path = entry.path.split('?')[0]
+  return route.name === entry.name || route.path === path || (path !== '/' && route.path.startsWith(`${path}/`))
+}
+const activeGroupKey = computed(() => {
+  for (const group of nav.value) {
+    if (group.items?.filter(visible).some(entryMatchesRoute)) return group.key
+    if (group.sections?.some(section => section.items.filter(visible).some(entryMatchesRoute))) return group.key
+  }
+  return ''
+})
+const activeGroupIsCollapsed = computed(() => {
+  const key = activeGroupKey.value
+  if (!key) return false
+  const group = nav.value.find((item) => item.key === key)
+  return Boolean(group && !isSimpleGroup(group) && !openGroups.value.includes(key))
+})
+const ensureActiveGroupOpen = () => {
+  const key = activeGroupKey.value
+  if (!key || openGroups.value.includes(key)) return
+  const group = nav.value.find((item) => item.key === key)
+  if (group && !isSimpleGroup(group)) openGroups.value = [...openGroups.value, key]
+}
+const toggle = (key: string) => {
+  openGroups.value = openGroups.value.includes(key) ? openGroups.value.filter((item) => item !== key) : [...openGroups.value, key]
+  if (key === activeGroupKey.value && activeGroupIsCollapsed.value) activeNavStyle.value = { opacity: '0' }
+}
 const closeMobileNav = () => { mobileNavOpen.value = false }
 const navigateMobile = async (entry: NavItem) => {
   closeMobileNav()
@@ -120,6 +125,10 @@ const navigateMobile = async (entry: NavItem) => {
 }
 async function syncActiveNavIndicator() {
   await nextTick()
+  if (activeGroupIsCollapsed.value) {
+    activeNavStyle.value = { opacity: '0' }
+    return
+  }
   const root = sideNav.value
   const active = root?.querySelector<HTMLElement>('.nav-item.router-link-active')
   if (!root || !active) {
@@ -135,9 +144,12 @@ async function syncActiveNavIndicator() {
     transform: `translate(${activeRect.left - rootRect.left}px, ${activeRect.top - rootRect.top + root.scrollTop}px)`,
   }
 }
-watch(() => route.fullPath, () => { closeMobileNav(); void syncActiveNavIndicator() }, { flush: 'post' })
-watch(openGroups, () => { void syncActiveNavIndicator() }, { deep: true, flush: 'post' })
-onMounted(() => { window.addEventListener('resize', syncActiveNavIndicator); void syncActiveNavIndicator() })
+watch(() => route.fullPath, () => { closeMobileNav(); ensureActiveGroupOpen(); void syncActiveNavIndicator() }, { flush: 'post' })
+watch(openGroups, () => {
+  void syncActiveNavIndicator()
+  window.setTimeout(() => { void syncActiveNavIndicator() }, 260)
+}, { deep: true, flush: 'post' })
+onMounted(() => { window.addEventListener('resize', syncActiveNavIndicator); ensureActiveGroupOpen(); void syncActiveNavIndicator() })
 onBeforeUnmount(() => window.removeEventListener('resize', syncActiveNavIndicator))
 async function leave() {
   try {

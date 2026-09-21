@@ -9,13 +9,13 @@ import AppConfirmDialog from '@/components/app/AppConfirmDialog.vue'
 import AppDialog from '@/components/app/AppDialog.vue'
 import AppImage from '@/components/app/AppImage.vue'
 import CatalogTreeNode from '@/components/catalog/CatalogTreeNode.vue'
-import StatusTag from '@/components/app/StatusTag.vue'
 import { bindDevicesToGateway, bindDiscoveredDevice, catalogModel, catalogTree, copyResource, createResource, deleteMetricTemplate, deviceArchiveProfile, deviceCards, deviceHistoryPage, deviceProfile, deviceTree, gatewayArchiveProfile, listResource, metricTemplates as loadMetricTemplatesApi, orgArchiveProfile, parseDevicePayloadPreview, provisionDevice, publishedModelOptions, removeResource, replayAccessRawMessage, resourceOptions, rootOrgs, saveDeviceAttributeOverrides, saveMetricTemplate as saveMetricTemplateApi, statistics, updateDeviceContext, updateResource } from '@/api/platform'
 import { useSessionStore } from '@/stores/session'
 import type { RecordRow } from '@/types/domain'
 import { loadBasicChartRuntime, type BasicChartRuntime } from '@/utils/chartRuntime'
 import { withDeviceLookupLabels } from '@/utils/deviceArchive'
 import { fieldLabel } from '@/utils/fieldLabels'
+import { displayValue as displayLabel } from '@/utils/displayValue'
 
 type FormType = 'org' | 'gateway' | 'device'
 type NodeType = 'ORG' | 'GATEWAY' | 'DEVICE' | 'SPACE' | 'GROUP'
@@ -27,12 +27,6 @@ interface TreeNode extends RecordRow {
 interface FlatNode {
   node: TreeNode
   level: number
-}
-
-interface ArchiveAction {
-  label: string
-  path: string
-  query: Record<string, string>
 }
 
 interface ArchiveForm extends Record<string, unknown> {
@@ -97,8 +91,6 @@ function daysAgo(days: number) {
   date.setDate(date.getDate() - days)
   return formatDateInput(date)
 }
-const archiveLink = (label: string, path: string, query: Record<string, string>): ArchiveAction => ({ label, path, query })
-
 const route = useRoute()
 const router = useRouter()
 const session = useSessionStore()
@@ -649,65 +641,6 @@ const overviewCards = computed(() => {
     [selectedIsGateway.value ? '启用设备' : '在线网关', selectedIsGateway.value ? profile.value.onlineDeviceCount ?? '—' : profile.value.onlineGatewayCount ?? '—'],
     ['近期告警', recentAlarms.value.length],
     ['能耗记录', energyTrend.value.length],
-  ]
-})
-const archiveSummaryCards = computed(() => {
-  const summary = (profile.value.summary || {}) as RecordRow
-  if (selectedIsSpace.value || selectedIsGroup.value) return [
-    ['设备数量', summary.deviceCount ?? nodeChildren(selectedNode.value as TreeNode).length],
-    ['当前视角', selectedIsSpace.value ? '安装空间' : '接入状态'],
-  ]
-  if (selectedIsDevice.value) return [
-    ['测点数量', summary.pointCount ?? pointDefinitions.value.length],
-    ['实时测点', summary.realtimePointCount ?? runtimeCards.value.filter((item) => !isMissingValue(item.value)).length],
-    ['计量记录', summary.historyCount ?? recentHistory.value.length],
-    ['待处理告警', summary.alarmCount ?? recentAlarms.value.length],
-    ['快照时间', summary.realtimeCollectTime ?? '—'],
-  ]
-  if (selectedIsGateway.value) return [
-    ['设备总数', summary.deviceCount ?? profile.value.deviceCount ?? '—'],
-    ['启用设备', summary.onlineDeviceCount ?? profile.value.onlineDeviceCount ?? '—'],
-    ['近期告警', summary.alarmCount ?? recentAlarms.value.length],
-    ['实时快照', summary.realtimeSnapshotCount ?? realtimeSnapshots.value.length],
-  ]
-  return [
-    ['设备总数', summary.deviceCount ?? profile.value.deviceCount ?? '—'],
-    ['网关总数', summary.gatewayCount ?? profile.value.gatewayCount ?? '—'],
-    ['在线网关', summary.onlineGatewayCount ?? profile.value.onlineGatewayCount ?? '—'],
-    ['近期告警', summary.alarmCount ?? recentAlarms.value.length],
-  ]
-})
-const defaultPointCodes = computed(() => {
-  const codes = pointDefinitions.value
-    .map((point) => String(point.point_code || point.pointCode || point.code || ''))
-    .filter(Boolean)
-    .slice(0, 3)
-  return codes.join(',')
-})
-const archiveActionLinks = computed<ArchiveAction[]>(() => {
-  if (!selectedNode.value) return []
-  const id = String(selectedNode.value.id)
-  if (selectedIsDevice.value) {
-    const links = [
-    archiveLink('实时监控', '/monitor/realtime', { deviceId: id }),
-    archiveLink('告警处置', '/alarms/events', { deviceId: id }),
-    archiveLink('工单与指令', '/access/commands', { targetId: id }),
-    archiveLink('设备控制', '/access/control', { targetId: id }),
-    ]
-    if (defaultPointCodes.value) links.splice(1, 0, archiveLink('计量分析', '/analysis/history', { deviceId: id, pointCodes: defaultPointCodes.value, startTime: historyStart.value, endTime: historyEnd.value }))
-    return links
-  }
-  if (selectedIsGateway.value) return [
-    archiveLink('接入诊断', '/access/diagnostic', { gatewayId: id }),
-    archiveLink('指令追踪', '/access/commands', { gatewayId: id }),
-    archiveLink('告警中心', '/alarms/events', { gatewayId: id }),
-  ]
-  if (!selectedIsOrg.value) return []
-  return [
-    archiveLink('告警中心', '/alarms/events', { orgId: id, includeChildren: 'true' }),
-    archiveLink('告警处置', '/alarms/workbench', { orgId: id, includeChildren: 'true' }),
-    archiveLink('租户合同', '/billing/subjects', { view: 'contracts', orgId: id }),
-    archiveLink('账单中心', '/billing/receivables', { view: 'bills', orgId: id, includeChildren: 'true' }),
   ]
 })
 const bindableDevices = computed(() => bindingDevices.value.filter((device) => String(device.gateway_id || '') !== String(selectedNode.value?.id || '')))
@@ -2235,15 +2168,6 @@ onBeforeUnmount(() => {
           <div v-if="!selectedNode" class="archive-main-empty">请选择左侧档案节点。</div>
 
           <template v-else>
-          <div class="archive-brief-strip">
-            <article v-for="item in archiveSummaryCards" :key="String(item[0])" class="archive-brief-card">
-              <span>{{ item[0] }}</span>
-              <b>{{ displayValue(item[1]) }}</b>
-            </article>
-          </div>
-          <div class="archive-link-strip">
-            <button v-for="link in archiveActionLinks" :key="link.path + link.label" class="quiet" @click="router.push({ path: link.path, query: link.query })">{{ link.label }}</button>
-          </div>
           <div v-if="selectedIsDevice || selectedIsOrg" class="archive-tabs">
             <button :class="{ active: activeArchiveTab === 'device' }" @click="activeArchiveTab = 'device'">基础档案</button>
             <button :class="{ active: activeArchiveTab === 'runtime' }" @click="activeArchiveTab = 'runtime'">实时运行数据</button>
@@ -2344,9 +2268,9 @@ onBeforeUnmount(() => {
                   <div v-if="!filteredInspectionRecords.length" class="archive-no-data">{{ inspectionRecords.length ? '当前筛选条件没有匹配记录。' : '暂无运维记录。' }}</div>
                   <div v-else class="archive-inspection-list">
                     <div v-for="row in filteredInspectionRecords" :key="String(row.id)">
-                      <b>{{ row.command_type || '运维操作' }}</b>
+                      <b>{{ displayLabel('command_type', row.command_type || '运维操作', row) }}</b>
                       <span>{{ row.target_sn || row.request_time || '—' }}</span>
-                      <small>{{ row.status ?? '—' }}</small>
+                      <small>{{ displayLabel('status', row.status, row) }}</small>
                     </div>
                   </div>
                 </div>
@@ -2488,7 +2412,10 @@ onBeforeUnmount(() => {
             <p>{{ item.org_name || '未分配组织' }} / {{ item.gateway_name || item.gateway_sn || '未绑定网关' }}</p>
           </div>
           <div class="device-card-actions">
-            <StatusTag domain="online" :value="item.online_status" />
+            <span class="device-card-status" :class="statusMeta(item.online_status).class">
+              <i aria-hidden="true"></i>
+              <span>{{ statusMeta(item.online_status).text }}</span>
+            </span>
             <button class="icon-btn" title="查看设备详情" aria-label="查看设备详情" @click="router.push(`/device-archive/devices/${item.id}`)"><FileText :size="16" /></button>
           </div>
         </article>
@@ -2606,7 +2533,7 @@ onBeforeUnmount(() => {
                   </details>
                 </div>
               </div>
-              <div class="attribute-view-table"><table><thead><tr><th>属性组</th><th>属性名称</th><th>属性编码</th><th>固定值</th><th>单位</th><th>用途</th></tr></thead><tbody><tr v-for="item in filteredModelAttributes" :key="String(item.attribute_code)"><td>{{ item.group_name || '—' }}</td><td>{{ item.attribute_name || '—' }}</td><td>{{ item.attribute_code || '—' }}</td><td>{{ item.attribute_value ?? '—' }}</td><td>{{ item.unit || '—' }}</td><td>{{ item.usage_type || '—' }}</td></tr><tr v-if="!filteredModelAttributes.length"><td colspan="6" class="empty-cell">暂无符合条件的型号与实例属性。</td></tr></tbody></table></div>
+              <div class="attribute-view-table"><table><thead><tr><th>属性组</th><th>属性名称</th><th>属性编码</th><th>固定值</th><th>单位</th><th>用途</th></tr></thead><tbody><tr v-for="item in filteredModelAttributes" :key="String(item.attribute_code)"><td>{{ item.group_name || '—' }}</td><td>{{ item.attribute_name || '—' }}</td><td>{{ item.attribute_code || '—' }}</td><td>{{ item.attribute_value ?? '—' }}</td><td>{{ item.unit || '—' }}</td><td>{{ displayLabel('usage_type', item.usage_type, item) }}</td></tr><tr v-if="!filteredModelAttributes.length"><td colspan="6" class="empty-cell">暂无符合条件的型号与实例属性。</td></tr></tbody></table></div>
             </template>
 
             <template v-else>
@@ -2640,9 +2567,9 @@ onBeforeUnmount(() => {
                       </div>
                       <dl class="point-card-info">
                         <dt>编码</dt><dd>{{ point.point_code || '—' }}</dd>
-                        <dt>类型</dt><dd>{{ point.data_type || '—' }}</dd>
+                        <dt>类型</dt><dd>{{ displayLabel('data_type', point.data_type, point) }}</dd>
                         <dt>单位</dt><dd>{{ point.unit || '—' }}</dd>
-                        <dt>角色</dt><dd>{{ point.business_role || '—' }}</dd>
+                        <dt>角色</dt><dd>{{ displayLabel('business_role', point.business_role, point) }}</dd>
                         <dt>计费</dt><dd>{{ Number(point.billable) === 1 ? '是' : '否' }}</dd>
                         <dt>统计</dt><dd>{{ Number(point.stat_enabled) === 1 ? '是' : '否' }}</dd>
                       </dl>
@@ -2726,7 +2653,7 @@ onBeforeUnmount(() => {
             </section>
             <section class="wizard-preview-panel">
               <div v-if="selectedPublishedModel" class="device-template-summary"><b>{{ selectedPublishedModel.display_name }}</b><small>采集周期 {{ selectedPublishedModel.collect_interval_seconds }} 秒 · 完整率阈值 {{ selectedPublishedModel.quality_threshold_pct }}%</small></div>
-              <div v-if="selectedPublishedModel" class="wizard-preview-list"><h4>模板属性</h4><div v-for="item in wizardTemplateAttributes" :key="String(item.attribute_id)"><span>{{ item.attribute_name }}</span><b>{{ item.attribute_value || item.default_value || '—' }}{{ item.unit || '' }}</b></div><p v-if="!wizardTemplateAttributes.length" class="empty-state">该模板暂无属性。</p><h4>测点能力（{{ wizardTemplatePoints.length }} 个）</h4><div v-for="item in wizardTemplatePoints.slice(0, 8)" :key="String(item.point_code)"><span>{{ item.point_name || item.point_code }}</span><b>{{ item.business_role || '—' }}</b></div></div>
+              <div v-if="selectedPublishedModel" class="wizard-preview-list"><h4>模板属性</h4><div v-for="item in wizardTemplateAttributes" :key="String(item.attribute_id)"><span>{{ item.attribute_name }}</span><b>{{ item.attribute_value || item.default_value || '—' }}{{ item.unit || '' }}</b></div><p v-if="!wizardTemplateAttributes.length" class="empty-state">该模板暂无属性。</p><h4>测点能力（{{ wizardTemplatePoints.length }} 个）</h4><div v-for="item in wizardTemplatePoints.slice(0, 8)" :key="String(item.point_code)"><span>{{ item.point_name || item.point_code }}</span><b>{{ displayLabel('business_role', item.business_role, item) }}</b></div></div>
               <p v-else class="empty-state">点击左侧已发布型号，查看模板属性和测点能力。</p>
             </section>
           </div>
@@ -2801,7 +2728,7 @@ onBeforeUnmount(() => {
             <input v-model="selectedMetricPointCodes" type="checkbox" :value="metricPointCode(point)">
             <span>
               <b>{{ point.point_name || metricPointCode(point) }}</b>
-              <small>{{ String(point.business_role || point.data_type || point.group_name || '未分组') }} · {{ metricPointCode(point) }} · {{ point.unit || '无单位' }}</small>
+              <small>{{ point.business_role ? displayLabel('business_role', point.business_role, point) : point.data_type ? displayLabel('data_type', point.data_type, point) : String(point.group_name || '未分组') }} · {{ metricPointCode(point) }} · {{ point.unit || '无单位' }}</small>
             </span>
           </label>
           <p v-if="!filteredMetricPointOptions.length" class="archive-no-data">当前设备没有可用测点。</p>
@@ -2830,4 +2757,5 @@ onBeforeUnmount(() => {
 .detail-view-filters{display:flex;align-items:center;gap:7px}.detail-view-filters input,.detail-view-filters select{height:30px;min-width:150px;padding:0 8px;border:1px solid var(--border);background:#fff;color:#52667e;font-size:11px}.attribute-view-table{margin:14px;overflow:auto;border:1px solid var(--border)}.attribute-view-table table{width:100%;min-width:720px;border-collapse:collapse;font-size:12px}.attribute-view-table th,.attribute-view-table td{height:38px;padding:7px 10px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap}.attribute-view-table th{background:#f7f9fc;color:#5b6e84;font-weight:600}@media(max-width:860px){.detail-view-filters{width:100%;flex-wrap:wrap}.detail-view-filters input,.detail-view-filters select{flex:1;min-width:130px}}
 .device-filter-field{min-width:190px}.device-search-field{min-width:min(330px,100%)}.device-filter-menu,.detail-filter-menu{position:relative;width:100%;min-width:0}.device-filter-menu summary,.detail-filter-menu summary{height:36px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 11px;border:1px solid #d4e2f2;border-radius:7px;background:#fff;color:#3d5876;cursor:pointer;list-style:none;box-shadow:0 1px 2px #17375c08;transition:border-color .18s,box-shadow .18s}.device-filter-menu summary::-webkit-details-marker,.detail-filter-menu summary::-webkit-details-marker{display:none}.device-filter-menu summary:hover,.detail-filter-menu summary:hover{border-color:var(--accent);box-shadow:0 0 0 3px #4c8dff12}.device-filter-menu[open]>div,.detail-filter-menu[open]>div{position:absolute;top:42px;left:0;z-index:12;display:grid;gap:3px;width:max-content;min-width:100%;max-width:min(360px,calc(100vw - 38px));max-height:260px;padding:8px;border:1px solid #d4e2f2;border-radius:8px;background:#fff;box-shadow:0 14px 30px #17375c20;overflow:auto;scrollbar-width:none}.device-filter-menu[open]>div::-webkit-scrollbar,.detail-filter-menu[open]>div::-webkit-scrollbar{display:none}.device-filter-menu label,.detail-filter-menu label{display:flex;align-items:center;gap:7px;min-height:30px;padding:0 8px;border-radius:5px;color:#38536f;font-size:12px;white-space:nowrap;cursor:pointer}.device-filter-menu label:hover,.detail-filter-menu label:hover{background:#f0f6ff;color:var(--accent)}.device-filter-menu input[type='checkbox'],.detail-filter-menu input[type='checkbox']{box-sizing:border-box;width:12px;height:12px;min-width:12px;max-width:12px;min-height:12px;max-height:12px;margin:0;padding:0;flex:0 0 12px;accent-color:var(--accent)}.device-filter-menu.disabled summary{border-style:dashed;background:#f7f9fc;color:#9aaabd;cursor:not-allowed}.filter-menu-hint{margin:2px 4px;padding:7px 8px;color:#8494a8;font-size:11px;white-space:nowrap}.detail-filter-search{height:36px;display:flex;align-items:center;gap:7px;min-width:220px;padding:0 10px;border:1px solid #d4e2f2;border-radius:7px;background:#fff;color:#7890aa}.detail-filter-search input{min-width:0;width:100%;height:auto!important;padding:0!important;border:0!important;box-shadow:none!important;outline:0}.detail-filter-menu{width:190px}.detail-filter-menu summary{font-size:11px}.detail-filter-menu[open]>div{right:0;left:auto}.detail-view-filters{display:flex;align-items:center;gap:8px}
 .device-card-media,.device-detail-image{display:grid;place-items:center;overflow:hidden;background:#f7f9fc;color:#8da1b7}.device-card-media img,.device-detail-image img{width:100%;height:100%;object-fit:cover;display:block}.device-detail-image{width:100%;aspect-ratio:4/3;border:1px solid var(--border);border-radius:8px}
+.device-card-status{display:inline-flex;align-items:center;gap:6px;color:#6e7f90;font-size:11px;white-space:nowrap}.device-card-status i{width:8px;height:8px;display:block;border-radius:50%;background:#9aa8b5;box-shadow:0 0 0 3px #eef2f5}.device-card-status.online{color:#187a5c}.device-card-status.online i{background:#1bb37d;box-shadow:0 0 0 3px #e5f6ef}.device-card-status.danger{color:#b54732}.device-card-status.danger i{background:#d95d48;box-shadow:0 0 0 3px #fff0ec}
 .device-context-grid--single{grid-template-columns:minmax(0,1fr)}.device-alarm-filters{margin:0 0 10px;flex-wrap:wrap}.device-alarm-filters .detail-filter-search{flex:1;min-width:240px}.detail-filter-select{height:30px;min-width:150px;padding:0 8px;border:1px solid var(--border);border-radius:6px;background:#fff;color:#52667e;font-size:11px}.device-context-table-card{overflow:hidden}.device-context-table-card .archive-full-table{border:1px solid #d9e5f2;border-radius:10px;background:#fbfdff;overflow:auto}.device-context-table-card .archive-full-table-head{background:#edf4fb;color:#49637f;font-weight:700;min-height:40px}.device-context-table-card .archive-full-table-row{min-height:44px;border-bottom:1px solid #e8eff6;transition:background .18s ease}.device-context-table-card .archive-full-table-row:hover{background:#f1f7ff}.device-context-table-card .archive-full-table-row span{color:#49627c}.device-context-table-card .archive-table-pagination{padding:10px 4px 0}.billing-dashboard-grid--compact{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.billing-dashboard-grid--compact .billing-dashboard-chart{min-height:280px}.billing-dashboard-grid--compact .billing-dashboard-prepared,.billing-dashboard-grid--compact .billing-dashboard-entry{grid-column:span 1}.billing-dashboard-grid--compact .billing-dashboard-prepared{grid-row:2}.billing-dashboard-grid--compact .billing-dashboard-entry{grid-row:2}.billing-stat-chart{width:100%;height:240px;min-height:240px}.settlement-switch-card{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:104px;padding:18px;border:1px solid #dce5ec;border-radius:12px;background:#f7f9fb}.settlement-switch-card.enabled{border-color:#c8ded8;background:#f4faf8}.settlement-switch-card>div{min-width:0}.settlement-switch-card b,.settlement-switch-card span{display:block}.settlement-switch-card b{color:#334b5e;font-size:17px}.settlement-switch-card span{margin-top:7px;color:#788b9b;font-size:12px;line-height:1.6}.settlement-switch-card button{flex:none;min-width:92px}@media(max-width:760px){.billing-dashboard-grid--compact{grid-template-columns:1fr}.billing-dashboard-grid--compact .billing-dashboard-prepared,.billing-dashboard-grid--compact .billing-dashboard-entry{grid-column:auto;grid-row:auto}.settlement-switch-card{align-items:flex-start;flex-direction:column}.settlement-switch-card button{width:100%}}.history-view-toggle{height:26px;padding:0 10px;border:1px solid #cbdced;border-radius:5px;background:#fff;color:#55718e;font-size:11px;white-space:nowrap}.history-view-toggle:hover{border-color:var(--accent);background:#f2f8ff;color:var(--accent)}.archive-wide-history-head,.archive-wide-history-row{display:grid;grid-template-columns:180px repeat(auto-fit,minmax(120px,1fr));min-width:max-content}.archive-wide-history-head{position:sticky;top:0;z-index:2;border-bottom:1px solid #d7e4f0;background:#f4f8fc;color:#55718e;font-weight:700}.archive-wide-history-row{border-bottom:1px solid #edf2f7;background:#fff}.archive-wide-history-row:nth-child(odd){background:#fbfcfe}.archive-wide-history-head span,.archive-wide-history-row span{min-width:0;padding:9px 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}.archive-wide-history-row span{color:#385675}.archive-wide-history-head span:first-child,.archive-wide-history-row span:first-child{position:sticky;left:0;background:inherit}.archive-scroll-table{overflow:auto}.archive-wide-history-head+ .archive-wide-history-row{}.billing-dashboard-grid--compact{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.billing-dashboard-grid--compact .billing-dashboard-chart{min-height:280px}.billing-dashboard-grid--compact .billing-dashboard-prepared,.billing-dashboard-grid--compact .billing-dashboard-entry{grid-column:span 1}.billing-dashboard-grid--compact .billing-dashboard-prepared{grid-row:2}.billing-dashboard-grid--compact .billing-dashboard-entry{grid-row:2}.billing-stat-chart{width:100%;height:240px;min-height:240px}.settlement-switch-card{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:104px;padding:18px;border:1px solid #dce5ec;border-radius:12px;background:#f7f9fb}.settlement-switch-card.enabled{border-color:#c8ded8;background:#f4faf8}.settlement-switch-card>div{min-width:0}.settlement-switch-card b,.settlement-switch-card span{display:block}.settlement-switch-card b{color:#334b5e;font-size:17px}.settlement-switch-card span{margin-top:7px;color:#788b9b;font-size:12px;line-height:1.6}.settlement-switch-card button{flex:none;min-width:92px}@media(max-width:760px){.billing-dashboard-grid--compact{grid-template-columns:1fr}.billing-dashboard-grid--compact .billing-dashboard-prepared,.billing-dashboard-grid--compact .billing-dashboard-entry{grid-column:auto;grid-row:auto}.settlement-switch-card{align-items:flex-start;flex-direction:column}.settlement-switch-card button{width:100%}}</style>
