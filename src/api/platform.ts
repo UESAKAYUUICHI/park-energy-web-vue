@@ -204,6 +204,7 @@ export const billingSupplementAction = (id: unknown, action: 'generate' | 'cance
 export const access = (path: string, params: Record<string, unknown> = {}) => request<RecordRow>(`/access/${path}${toQuery(params)}`)
 export const bindDiscoveredDevice = (id: unknown, body: RecordRow) => request<RecordRow>(`/access/discovered-devices/${id}/bind`, { method: 'POST', ...json(body) })
 export const replayAccessRawMessage = (id: unknown) => request<RecordRow>(`/access/raw-messages/${id}/replay`, { method: 'POST' })
+export const sendAccessCommand = (body: RecordRow) => request<RecordRow>('/access/commands', { method: 'POST', ...json(body) })
 export const sendCommand = (body: RecordRow) => request<RecordRow>('/workspace/commands', { method: 'POST', ...json(body) })
 export const rbac = (path: string, init: RequestInit = {}) => request<RecordRow | RecordRow[]>(`/rbac/${path}`, init)
 export const rbacPage = (path: string, params: Record<string, unknown> = {}) => request<PageResult<RecordRow>>(`/rbac/${path}${toQuery(params)}`)
