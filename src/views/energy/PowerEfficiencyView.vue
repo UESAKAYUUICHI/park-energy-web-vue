@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Activity, Gauge, History } from '@lucide/vue'
-import PowerEfficiencyWorkbench from '@/views/PowerEfficiencyWorkbench.vue'
+import PowerEfficiencyWorkbench from '@/views/energy/PowerEfficiencyWorkbench.vue'
 
 type Tab = 'three-phase-monitor' | 'power-efficiency-analysis' | 'energy-consume-statistics'
 const route = useRoute()

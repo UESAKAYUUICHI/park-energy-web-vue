@@ -1,33 +1,33 @@
 import type { LocationQuery, RouteRecordRaw } from 'vue-router'
 
 const componentFor = (kind: string) => {
-  if (kind === 'dashboard') return () => import('@/views/DashboardView.vue')
-  if (kind === 'energy-screen') return () => import('@/views/EnergyScreenView.vue')
-  if (kind === 'device-archive') return () => import('@/views/DeviceArchiveView.vue')
-  if (kind === 'product-catalog') return () => import('@/views/ProductCatalogView.vue')
-  if (kind === 'protocol-catalog') return () => import('@/views/ProtocolCatalogView.vue')
-  if (kind === 'global-dictionary') return () => import('@/views/GlobalDictionaryView.vue')
-  if (kind === 'resource') return () => import('@/views/ResourceView.vue')
-  if (kind === 'power-efficiency') return () => import('@/views/PowerEfficiencyView.vue')
-  if (kind === 'edge-config') return () => import('@/views/EdgeConfigView.vue')
-  if (['alarms', 'alarm-workbench'].includes(kind)) return () => import('@/views/AlarmView.vue')
-  if (kind === 'alarm-protocols') return () => import('@/views/AlarmProtocolView.vue')
-  if (kind === 'operations') return () => import('@/views/OperationsView.vue')
-  if (['access', 'control', 'commands'].includes(kind)) return () => import('@/views/AccessView.vue')
-  if (kind === 'rbac-workbench') return () => import('@/views/RbacWorkbenchView.vue')
-  if (kind === 'user-org-binding') return () => import('@/views/UserOrgBindingView.vue')
-  if (kind === 'tenant-management') return () => import('@/views/TenantManagementView.vue')
-  if (kind === 'personal-center') return () => import('@/views/PersonalCenterView.vue')
-  if (kind === 'billing-erp-overview') return () => import('@/views/BillingOverviewWorkspaceView.vue')
-  if (kind === 'billing-rules-workspace') return () => import('@/views/BillingRulesWorkspaceView.vue')
-  if (kind === 'billing-payment-workspace') return () => import('@/views/BillingPaymentWorkspaceView.vue')
-  if (kind === 'billing-archive-workspace') return () => import('@/views/BillingArchiveWorkspaceView.vue')
-  return () => import('@/views/SystemView.vue')
+  if (kind === 'dashboard') return () => import('@/views/dashboard/DashboardView.vue')
+  if (kind === 'energy-screen') return () => import('@/views/dashboard/EnergyScreenView.vue')
+  if (kind === 'device-archive') return () => import('@/views/archive/DeviceArchiveView.vue')
+  if (kind === 'product-catalog') return () => import('@/views/archive/ProductCatalogView.vue')
+  if (kind === 'protocol-catalog') return () => import('@/views/archive/ProtocolCatalogView.vue')
+  if (kind === 'global-dictionary') return () => import('@/views/archive/GlobalDictionaryView.vue')
+  if (kind === 'resource') return () => import('@/views/archive/ResourceView.vue')
+  if (kind === 'power-efficiency') return () => import('@/views/energy/PowerEfficiencyView.vue')
+  if (kind === 'edge-config') return () => import('@/views/access/EdgeConfigView.vue')
+  if (['alarms', 'alarm-workbench'].includes(kind)) return () => import('@/views/alarms/AlarmView.vue')
+  if (kind === 'alarm-protocols') return () => import('@/views/alarms/AlarmProtocolView.vue')
+  if (kind === 'operations') return () => import('@/views/operations/OperationsView.vue')
+  if (['access', 'control', 'commands'].includes(kind)) return () => import('@/views/access/AccessView.vue')
+  if (kind === 'rbac-workbench') return () => import('@/views/system/RbacWorkbenchView.vue')
+  if (kind === 'user-org-binding') return () => import('@/views/system/UserOrgBindingView.vue')
+  if (kind === 'tenant-management') return () => import('@/views/system/TenantManagementView.vue')
+  if (kind === 'personal-center') return () => import('@/views/system/PersonalCenterView.vue')
+  if (kind === 'billing-erp-overview') return () => import('@/views/billing/BillingOverviewWorkspaceView.vue')
+  if (kind === 'billing-rules-workspace') return () => import('@/views/billing/BillingRulesWorkspaceView.vue')
+  if (kind === 'billing-payment-workspace') return () => import('@/views/billing/BillingPaymentWorkspaceView.vue')
+  if (kind === 'billing-archive-workspace') return () => import('@/views/billing/BillingArchiveWorkspaceView.vue')
+  return () => import('@/views/system/SystemView.vue')
 }
 const page = (path: string, name: string, title: string, permission: string | undefined, kind: string, resource?: string): RouteRecordRaw => ({ path, name, component: componentFor(kind), meta: { title, permission, kind, resource } })
 const workbenchRedirect = (path: string, view: string) => (to: { query: LocationQuery }) => ({ path, query: { ...to.query, view } })
 export const routeRecords: RouteRecordRaw[] = [
-  { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { title: '登录' } },
+  { path: '/login', name: 'login', component: () => import('@/views/auth/LoginView.vue'), meta: { title: '登录' } },
   page('/dashboard', 'dashboard', '数据总览', undefined, 'dashboard'),
   page('/energy-screen', 'energy-screen', '园区能源大屏', undefined, 'energy-screen'),
   page('/device-archive/org-tree', 'device-archive-org-tree', '组织档案树', 'archive:list', 'device-archive', 'org-tree'), page('/device-archive/devices', 'device-archive-devices', '设备档案', 'archive:list', 'device-archive', 'devices'), page('/device-archive/devices/:id', 'device-archive-device-detail', '设备详情', 'archive:list', 'device-archive', 'device-detail'),
@@ -71,5 +71,5 @@ export const routeRecords: RouteRecordRaw[] = [
   page('/operations/work-orders', 'operations-work-orders', '运维工作台', 'ops:workorder:list', 'operations', 'work-orders'),
   { path: '/operations/inspections', redirect: { path: '/operations/work-orders', query: { view: 'inspections' } } },
   page('/system/users', 'system-users', '用户管理', 'system:user:list', 'users'), page('/system/tenants', 'system-tenants', '租户管理', 'system:user:list', 'tenant-management'), page('/system/roles', 'system-roles', '角色管理', 'system:role:list', 'roles'), page('/system/permissions', 'system-permissions', '权限字典', 'system:permission:list', 'permissions'), page('/system/rbac-workbench', 'system-rbac-workbench', '模块权限分配', 'system:role:list', 'rbac-workbench'), page('/system/user-org-bindings', 'system-user-org-bindings', '用户组织绑定', 'system:user:scope:list', 'user-org-binding'), page('/system/audit', 'system-audit', '操作审计', 'system:operation:list', 'audit'), page('/account/profile', 'personal-center', '个人中心', undefined, 'personal-center'), { path: '/profile', redirect: '/account/profile' },
-  { path: '/403', name: 'forbidden', component: () => import('@/views/ForbiddenView.vue'), meta: { title: '无访问权限' } }, { path: '/', redirect: '/dashboard' }, { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
+  { path: '/403', name: 'forbidden', component: () => import('@/views/auth/ForbiddenView.vue'), meta: { title: '无访问权限' } }, { path: '/', redirect: '/dashboard' }, { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
 ]

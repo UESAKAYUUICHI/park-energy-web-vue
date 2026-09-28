@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import '../styles/archive-history-fix.css'
+import '../../styles/archive-history-fix.css'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useAlertRef } from '@/composables/useAppAlert'
 import { useRoute, useRouter } from 'vue-router'
