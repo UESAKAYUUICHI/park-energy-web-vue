@@ -5,6 +5,7 @@ export type EfficiencyPageKind = 'three-phase-monitor' | 'power-efficiency-analy
 
 export interface EfficiencyRequest {
   deviceId: string
+  orgId: string
   startDate: string
   endDate: string
 }
@@ -14,6 +15,7 @@ export interface EfficiencyDeviceOption extends RecordRow {
   device_name: string
   device_sn: string
   org_name?: string
+  org_id?: string | number
   gateway_name?: string
 }
 
@@ -64,9 +66,9 @@ const mockDelay = (ms = 120) => new Promise((resolve) => setTimeout(resolve, ms)
 const clone = <T,>(value: T) => JSON.parse(JSON.stringify(value)) as T
 
 const deviceOptions: EfficiencyDeviceOption[] = [
-  { id: '101', device_name: '一号配电房总表', device_sn: 'EE-101', org_name: 'A区园区', gateway_name: 'GW-A01' },
-  { id: '102', device_name: '制冷机组总表', device_sn: 'EE-102', org_name: 'A区园区', gateway_name: 'GW-A02' },
-  { id: '103', device_name: '办公楼配电柜', device_sn: 'EE-103', org_name: 'B区园区', gateway_name: 'GW-B01' },
+  { id: '101', device_name: '一号配电房总表', device_sn: 'EE-101', org_id: 'park-a', org_name: 'A区园区', gateway_name: 'GW-A01' },
+  { id: '102', device_name: '制冷机组总表', device_sn: 'EE-102', org_id: 'park-a', org_name: 'A区园区', gateway_name: 'GW-A02' },
+  { id: '103', device_name: '办公楼配电柜', device_sn: 'EE-103', org_id: 'park-b', org_name: 'B区园区', gateway_name: 'GW-B01' },
 ]
 
 const phaseTimes = ['00:00', '02:00', '04:00', '06:00', '08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00', '22:00']

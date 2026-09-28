@@ -17,3 +17,65 @@
   flex: 1;
   min-height: 0;
 }
+
+.archive-wide-history-head,
+.archive-wide-history-row {
+  align-items: center;
+}
+
+.archive-wide-history-head {
+  height: 40px;
+  min-height: 40px;
+  line-height: 1;
+}
+
+.archive-wide-history-head span,
+.archive-wide-history-row span {
+  display: block;
+  min-width: 120px;
+  padding: 0 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: keep-all;
+  line-height: 1.1;
+}
+
+.archive-wide-history-head span:first-child,
+.archive-wide-history-row span:first-child {
+  min-width: 180px;
+}
+
+.device-efficiency-subtabs {
+  display: flex;
+  flex: none;
+  gap: 5px;
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.device-efficiency-subtabs button {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: #fff;
+  color: #58718c;
+  font-size: 11px;
+}
+
+.device-efficiency-subtabs button.active {
+  border-color: var(--accent);
+  background: var(--blue-soft);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.device-efficiency-workbench {
+  padding-top: 8px;
+  overflow: hidden;
+}
+
+.device-efficiency-workbench .efficiency-workbench {
+  height: 100%;
+}

@@ -9,10 +9,11 @@ import type { RecordRow } from '@/types/domain'
 import { loadEfficiencyPage, type DataModelPredictData, type EfficiencyDeviceOption, type EfficiencyPageKind, type EnergyConsumeStatisticsData, type PowerEfficiencyAnalysisData, type ThreePhaseMonitorData } from '@/api/energyEfficiency'
 import { loadEfficiencyChartRuntime, type EfficiencyChartRuntime } from '@/utils/chartRuntime'
 
-const props = defineProps<{ page: EfficiencyPageKind }>()
+const props = withDefaults(defineProps<{ page: EfficiencyPageKind; initialDeviceId?: string; showDeviceFilter?: boolean; showPageSwitcher?: boolean; scopeMode?: 'global' | 'device' }>(), { initialDeviceId: '', showDeviceFilter: true, showPageSwitcher: true, scopeMode: 'global' })
 const emit = defineEmits<{ 'update:context': [value: { deviceId: string; startDate: string; endDate: string }], 'switch-page': [value: EfficiencyPageKind] }>()
 
-const deviceId = ref('101')
+const deviceId = ref(props.initialDeviceId || '')
+const orgId = ref('')
 const startDate = ref(daysAgo(29))
 const endDate = ref(today())
 const loading = ref(false)
@@ -93,6 +94,8 @@ function createEmptyPageData(page: EfficiencyPageKind): ThreePhaseMonitorData | 
   return createEmptyPredictData()
 }
 
+const orgOptions = computed(() => [...new Map(devices.value.map((item) => [String(item.org_id || item.org_name || ''), { id: String(item.org_id || item.org_name || ''), name: String(item.org_name || item.org_id || '未标注组织') }])).values()].filter((item) => item.id))
+const visibleDevices = computed(() => orgId.value ? devices.value.filter((item) => String(item.org_id || item.org_name) === orgId.value) : devices.value)
 const selectedDevice = computed(() => devices.value.find((item) => String(item.id) === deviceId.value))
 const contextHint = computed(() => selectedDevice.value ? `${selectedDevice.value.device_name} · ${selectedDevice.value.device_sn}` : '全部授权设备')
 const pageTitle = computed(() => props.page === 'three-phase-monitor' ? '三相工况实时监测' : props.page === 'power-efficiency-analysis' ? '功率与能效分析' : '能耗统计分析')
@@ -315,7 +318,7 @@ async function load() {
   error.value = ''
   emit('update:context', { deviceId: deviceId.value, startDate: startDate.value, endDate: endDate.value })
   try {
-    const data = await loadEfficiencyPage(props.page, { deviceId: deviceId.value, startDate: startDate.value, endDate: endDate.value }, {
+    const data = await loadEfficiencyPage(props.page, { deviceId: deviceId.value, orgId: orgId.value, startDate: startDate.value, endDate: endDate.value }, {
       timeGranularity: timeGranularity.value,
       forecastWindow: forecastWindow.value,
       riskMode: riskMode.value,
@@ -334,11 +337,13 @@ async function load() {
 }
 
 function refresh() { void load() }
-function reset() { deviceId.value = '101'; startDate.value = daysAgo(29); endDate.value = today(); if (props.page === 'three-phase-monitor') timeGranularity.value = '1h'; void load() }
+function reset() { deviceId.value = props.initialDeviceId || ''; orgId.value = ''; startDate.value = daysAgo(29); endDate.value = today(); if (props.page === 'three-phase-monitor') timeGranularity.value = '1h'; void load() }
 function jumpTo(page: EfficiencyPageKind) { if (page === props.page) return; emit('switch-page', page) }
 
 watch(() => props.page, (page) => { disposeCharts(); pageData.value = createEmptyPageData(page); void load() })
-watch([deviceId, startDate, endDate, timeGranularity, forecastWindow, riskMode, loadPerturbation], () => { scheduleLoad(load) })
+watch([deviceId, orgId, startDate, endDate, timeGranularity, forecastWindow, riskMode, loadPerturbation], () => { scheduleLoad(load) })
+watch(orgId, (value) => { if (value && !visibleDevices.value.some((item) => String(item.id) === deviceId.value)) deviceId.value = '' })
+watch(() => props.initialDeviceId, (value) => { if (props.scopeMode === 'device' && value) deviceId.value = value })
 watch([pageData], () => { void renderCharts() }, { deep: true })
 onMounted(() => { void loadDevices(); void load(); window.addEventListener('resize', renderCharts) })
 onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resize', renderCharts); disposeCharts() })
@@ -348,7 +353,8 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
   <section class="efficiency-workbench">
     <article class="efficiency-filter-card">
       <div class="efficiency-filter-fields">
-        <label class="field wide"><span>设备范围</span><select v-model="deviceId"><option v-for="device in devices" :key="device.id" :value="device.id">{{ device.device_name }} · {{ device.device_sn }}</option></select></label>
+        <label v-if="props.scopeMode === 'global'" class="field"><span>园区 / 组织</span><select v-model="orgId"><option value="">全部授权范围</option><option v-for="org in orgOptions" :key="org.id" :value="org.id">{{ org.name }}</option></select></label>
+        <label v-if="props.showDeviceFilter" class="field wide"><span>设备范围</span><select v-model="deviceId"><option value="">全部设备</option><option v-for="device in visibleDevices" :key="device.id" :value="device.id">{{ device.device_name }} · {{ device.device_sn }}</option></select></label>
         <label class="field"><span>{{ periodLabel }}</span><input v-model="startDate" type="date"><small v-if="periodHint" class="field-hint">{{ periodHint }}</small></label>
         <label class="field"><span>结束日期</span><input v-model="endDate" type="date"></label>
         <div class="efficiency-filter-actions">
@@ -370,13 +376,16 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
             <h2>{{ pageTitle }}</h2>
             <small>{{ pageSubTitle }} · {{ contextHint }}</small>
           </div>
-          <div class="efficiency-state-pills">
+          <div v-if="props.showPageSwitcher" class="efficiency-state-pills">
             <button :class="{ active: isThreePhase }" @click="jumpTo('three-phase-monitor')">三相监测</button>
             <button :class="{ active: isAnalysis }" @click="jumpTo('power-efficiency-analysis')">功率分析</button>
             <button :class="{ active: isStatistics }" @click="jumpTo('energy-consume-statistics')">能耗统计</button>
           </div>
         </div>
 
+        <div class="efficiency-metric-strip">
+          <article v-for="metric in metrics" :key="String(metric.label)" class="efficiency-metric-card"><span>{{ metric.label }}</span><strong>{{ display(metric.value) }}<small>{{ metric.unit }}</small></strong><em :class="String(metric.status || 'normal')">{{ metric.hint || '当前统计' }}</em></article>
+        </div>
         <div class="efficiency-scroll-shell">
           <div v-if="isThreePhase" class="page-layout three-phase-layout">
             <div class="page-main-frame page-main-frame--full">
@@ -484,6 +493,7 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
 <style scoped>
 .efficiency-workbench{height:100%;min-height:0;display:flex;flex-direction:column;gap:12px;overflow:hidden}
 .efficiency-filter-card{flex:none;border:1px solid #dce7f3;border-radius:10px;background:#fff;padding:11px 14px;box-shadow:0 2px 8px rgb(35 75 120 / 4%)}
+.efficiency-metric-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;flex:none}.efficiency-metric-card{min-width:0;padding:10px 11px;border:1px solid #dce7f3;border-radius:8px;background:#fff}.efficiency-metric-card span,.efficiency-metric-card strong,.efficiency-metric-card em{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.efficiency-metric-card span{color:#71849a;font-size:10px}.efficiency-metric-card strong{margin-top:5px;color:#244568;font-size:20px}.efficiency-metric-card strong small{margin-left:3px;color:#7890a8;font-size:10px;font-weight:500}.efficiency-metric-card em{margin-top:4px;color:#8091a4;font-size:10px;font-style:normal}.efficiency-metric-card em.warn{color:#c57a26}.efficiency-metric-card em.success{color:#238260}
 .efficiency-filter-fields{display:flex;align-items:end;gap:10px;flex-wrap:wrap}
 .field{min-width:150px;display:flex;flex-direction:column;gap:5px}
 .field.wide{min-width:220px}
@@ -536,5 +546,5 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
 .chart-empty{flex:1;min-height:0;margin:0;display:grid;place-content:center;justify-items:center;gap:9px;color:#899caf;font-size:12px;line-height:1.3;text-align:center}
 .chart-empty::before{content:"";box-sizing:border-box;width:28px;height:21px;border:1.5px solid #9eb2c8;border-radius:4px;background:linear-gradient(145deg,transparent 47%,#c4d1df 48% 52%,transparent 53%);box-shadow:inset 0 -5px 0 #f4f7fa}
 @media (max-width:1180px){.page-layout{grid-template-columns:1fr}.event-rail{order:2;min-height:240px}.page-main-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.span-2{grid-column:1 / -1}.predict-version{margin-left:0}}
-@media (max-width:760px){.efficiency-workbench{overflow:hidden}.efficiency-workbench-body{overflow:hidden}.efficiency-page-headline{align-items:flex-start;flex-direction:column}.page-layout,.page-main-grid{grid-template-columns:1fr}.span-2{grid-column:auto}.chart-panel{height:240px;min-height:220px}.gauge-fill{min-height:220px}.field,.field.wide{min-width:0;width:100%}.efficiency-filter-actions{margin-left:0}.predict-toolbar input[type='range']{min-width:0;width:100%}}
+@media (max-width:900px){.efficiency-metric-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}@media (max-width:760px){.efficiency-workbench{overflow:hidden}.efficiency-workbench-body{overflow:hidden}.efficiency-page-headline{align-items:flex-start;flex-direction:column}.page-layout,.page-main-grid{grid-template-columns:1fr}.span-2{grid-column:auto}.chart-panel{height:240px;min-height:220px}.gauge-fill{min-height:220px}.field,.field.wide{min-width:0;width:100%}.efficiency-filter-actions{margin-left:0}.predict-toolbar input[type='range']{min-width:0;width:100%}.efficiency-metric-strip{grid-template-columns:1fr}}
 </style>

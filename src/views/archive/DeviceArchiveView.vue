@@ -8,6 +8,7 @@ import type { ECharts, EChartsCoreOption } from 'echarts/core'
 import AppConfirmDialog from '@/components/app/AppConfirmDialog.vue'
 import AppDialog from '@/components/app/AppDialog.vue'
 import AppImage from '@/components/app/AppImage.vue'
+import PowerEfficiencyWorkbench from '@/views/energy/PowerEfficiencyWorkbench.vue'
 import CatalogTreeNode from '@/components/catalog/CatalogTreeNode.vue'
 import { bindDevicesToGateway, bindDiscoveredDevice, catalogModel, catalogTree, copyResource, createResource, deleteMetricTemplate, deviceArchiveProfile, deviceCards, deviceHistoryPage, deviceProfile, deviceTree, gatewayArchiveProfile, listResource, metricTemplates as loadMetricTemplatesApi, orgArchiveProfile, parseDevicePayloadPreview, provisionDevice, publishedModelOptions, removeResource, replayAccessRawMessage, resourceOptions, rootOrgs, saveDeviceAttributeOverrides, saveMetricTemplate as saveMetricTemplateApi, statistics, updateDeviceContext, updateResource } from '@/api/platform'
 import { useSessionStore } from '@/stores/session'
@@ -187,7 +188,8 @@ const form = reactive<ArchiveForm>({
   meter_factor: 1,
   quality_gate_start_date: formatDateInput(new Date()),
 })
-const activeArchiveTab = ref<'device' | 'inspection' | 'runtime' | 'history' | 'alarm'>('device')
+const activeArchiveTab = ref<'device' | 'inspection' | 'runtime' | 'efficiency' | 'history' | 'alarm'>('device')
+const deviceEfficiencyTab = ref<'three-phase-monitor' | 'power-efficiency-analysis' | 'energy-consume-statistics'>('power-efficiency-analysis')
 const detailWorkspaceTab = ref<'overview' | 'alarms' | 'billing' | 'attributes' | 'points'>('overview')
 const settlementSwitching = ref(false)
 const dataView = ref<'chart' | 'table'>('chart')
@@ -2170,7 +2172,8 @@ onBeforeUnmount(() => {
           <template v-else>
           <div v-if="selectedIsDevice || selectedIsOrg" class="archive-tabs">
             <button :class="{ active: activeArchiveTab === 'device' }" @click="activeArchiveTab = 'device'">基础档案</button>
-            <button :class="{ active: activeArchiveTab === 'runtime' }" @click="activeArchiveTab = 'runtime'">实时运行数据</button>
+             <button :class="{ active: activeArchiveTab === 'runtime' }" @click="activeArchiveTab = 'runtime'">实时运行数据</button>
+             <button v-if="selectedIsDevice" :class="{ active: activeArchiveTab === 'efficiency' }" @click="activeArchiveTab = 'efficiency'">能效分析</button>
             <button :class="{ active: activeArchiveTab === 'history' }" @click="activeArchiveTab = 'history'">计量历史</button>
             <button :class="{ active: activeArchiveTab === 'alarm' }" @click="activeArchiveTab = 'alarm'">告警与工单</button>
             <button :class="{ active: activeArchiveTab === 'inspection' }" @click="activeArchiveTab = 'inspection'">运维记录</button>
@@ -2179,7 +2182,7 @@ onBeforeUnmount(() => {
             <button class="active">{{ selectedIsGateway ? '网关概览' : selectedIsSpace ? '空间概览' : selectedIsGroup ? '状态分组' : '组织概览' }}</button>
           </div>
 
-          <div v-if="(!selectedIsDevice && !selectedIsOrg) || ['device', 'inspection', 'runtime'].includes(activeArchiveTab)" class="archive-runtime-grid">
+           <div v-if="(!selectedIsDevice && !selectedIsOrg) || ['device', 'inspection', 'runtime', 'efficiency'].includes(activeArchiveTab)" class="archive-runtime-grid">
             <article class="archive-info-card">
               <div class="archive-section-title">
                 <i></i>
@@ -2187,7 +2190,7 @@ onBeforeUnmount(() => {
                 <small>{{ selectedIsDevice ? '设备真实详情' : '当前节点详情' }}</small>
                 <label class="archive-show-all"><input v-model="showAllData" type="checkbox">显示全部数据</label>
               </div>
-              <div class="archive-card-scroll">
+               <div class="archive-card-scroll">
                 <dl>
                   <template v-for="item in selectedBasicInfo" :key="String(item[0])">
                     <dt>{{ item[0] }}</dt>
@@ -2272,7 +2275,19 @@ onBeforeUnmount(() => {
                       <span>{{ row.target_sn || row.request_time || '—' }}</span>
                       <small>{{ displayLabel('status', row.status, row) }}</small>
                     </div>
-                  </div>
+                 </div>
+               </div>
+              </template>
+
+              <template v-else-if="activeArchiveTab === 'efficiency'">
+                <div class="archive-section-title archive-realtime-title"><i></i><h3>设备能效分析</h3><small>当前设备图表</small></div>
+                <div class="device-efficiency-subtabs">
+                  <button :class="{ active: deviceEfficiencyTab === 'three-phase-monitor' }" @click="deviceEfficiencyTab = 'three-phase-monitor'">三相监测</button>
+                  <button :class="{ active: deviceEfficiencyTab === 'power-efficiency-analysis' }" @click="deviceEfficiencyTab = 'power-efficiency-analysis'">功率分析</button>
+                  <button :class="{ active: deviceEfficiencyTab === 'energy-consume-statistics' }" @click="deviceEfficiencyTab = 'energy-consume-statistics'">能耗统计</button>
+                </div>
+                <div class="archive-card-scroll device-efficiency-workbench">
+                  <PowerEfficiencyWorkbench :page="deviceEfficiencyTab" :initial-device-id="String(detailDevice.id || selectedNode?.id || '')" :show-device-filter="false" :show-page-switcher="false" scope-mode="device" />
                 </div>
               </template>
 
