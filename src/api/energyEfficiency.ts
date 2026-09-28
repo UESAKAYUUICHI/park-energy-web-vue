@@ -61,7 +61,6 @@ export interface DataModelPredictData extends RecordRow {
   loadPerturbation: number
 }
 
-const useMock = import.meta.env.VITE_EFFICIENCY_USE_MOCK !== '0'
 const mockDelay = (ms = 120) => new Promise((resolve) => setTimeout(resolve, ms))
 const clone = <T,>(value: T) => JSON.parse(JSON.stringify(value)) as T
 
@@ -252,28 +251,88 @@ const mockPredict = (filters: EfficiencyRequest, forecastWindow: '24h' | '7d', r
   loadPerturbation,
 })
 
-async function loadThreePhase(filters: EfficiencyRequest, timeGranularity: '10m' | '1h' | '24h') {
-  if (!useMock) return request<ThreePhaseMonitorData>(`/energy-efficiency/three-phase-monitor${toQuery({ ...filters, timeGranularity } as Record<string, unknown>)}`)
-  await mockDelay()
-  return mockThreePhase(filters, timeGranularity)
+const rows = (value: unknown): RecordRow[] => Array.isArray(value) ? value as RecordRow[] : []
+const valueOf = (row: RecordRow, key: string) => Number(row[key] ?? 0)
+const labelOf = (row: RecordRow) => String(row.time || row.stat_period || '')
+
+async function realContext(filters: EfficiencyRequest) {
+  const query = toQuery(filters as unknown as Record<string, unknown>)
+  const [overview, drilldown] = await Promise.all([
+    request<RecordRow>(`/energy/efficiency/overview${query}`),
+    request<RecordRow>(`/energy/drilldown${query}`),
+  ])
+  return { overview, drilldown, hourly: rows(overview.hourlySeries), trend: rows(drilldown.trend) }
 }
 
-async function loadAnalysis(filters: EfficiencyRequest) {
-  if (!useMock) return request<PowerEfficiencyAnalysisData>(`/energy-efficiency/power-efficiency-analysis${toQuery(filters as unknown as Record<string, unknown>)}`)
-  await mockDelay()
-  return mockAnalysis(filters)
+async function loadThreePhase(filters: EfficiencyRequest, timeGranularity: '10m' | '1h' | '24h'): Promise<ThreePhaseMonitorData> {
+  const { overview, hourly } = await realContext(filters)
+  const quality = (overview.quality || {}) as RecordRow
+  const latest = hourly.at(-1) || {}
+  const phaseSummary = ['A', 'B', 'C'].map((phase) => ({ phase: `${phase}相`, voltage: valueOf(latest, `voltage_${phase.toLowerCase()}`), current: valueOf(latest, `current_${phase.toLowerCase()}`), status: '实时统计' }))
+  return {
+    metrics: [
+      { label: '电压合格率', value: quality.voltageQualifiedRate, unit: '%', hint: '统计周期' },
+      { label: '三相不平衡度', value: quality.threePhaseImbalance, unit: '%', hint: '小时均值' },
+      { label: '数据完整率', value: overview.dataCompleteRate, unit: '%', hint: '真实采集' },
+      { label: '最大需量', value: quality.maxDemand, unit: 'kW', hint: '统计周期' },
+    ],
+    phaseSummary,
+    voltageSeries: hourly.map((row) => ({ time: labelOf(row), A: valueOf(row, 'voltage_a'), B: valueOf(row, 'voltage_b'), C: valueOf(row, 'voltage_c') })),
+    currentSeries: hourly.map((row) => ({ time: labelOf(row), A: valueOf(row, 'current_a'), B: valueOf(row, 'current_b'), C: valueOf(row, 'current_c') })),
+    frequencySeries: hourly.map((row) => ({ time: labelOf(row), frequency: valueOf(row, 'frequency') })),
+    events: rows(overview.judgements).map((row) => ({ level: String(row.level || '').toLowerCase(), title: String(row.code || '能效判断'), detail: `当前值 ${row.value ?? '—'}`, time: '统计周期' })),
+    timeGranularity,
+  }
 }
 
-async function loadStatistics(filters: EfficiencyRequest) {
-  if (!useMock) return request<EnergyConsumeStatisticsData>(`/energy-efficiency/energy-consume-statistics${toQuery(filters as unknown as Record<string, unknown>)}`)
-  await mockDelay()
-  return mockStatistics(filters)
+async function loadAnalysis(filters: EfficiencyRequest): Promise<PowerEfficiencyAnalysisData> {
+  const { overview, hourly } = await realContext(filters)
+  const quality = (overview.quality || {}) as RecordRow
+  const latest = hourly.at(-1) || {}
+  const active = valueOf(latest, 'active_power')
+  const reactive = valueOf(latest, 'reactive_power')
+  const apparent = valueOf(latest, 'apparent_power')
+  const maxDemand = Number(quality.maxDemand || 0)
+  return {
+    metrics: [
+      { label: '总有功功率', value: active, unit: 'kW', hint: '最新小时' },
+      { label: '总无功功率', value: reactive, unit: 'kvar', hint: '最新小时' },
+      { label: '总视在功率', value: apparent, unit: 'kVA', hint: '最新小时' },
+      { label: '功率因数', value: quality.powerFactor, unit: '', hint: '统计均值' },
+      { label: '最大需量', value: maxDemand, unit: 'kW', hint: '统计周期' },
+    ],
+    gaugeValue: Number(quality.powerFactor || latest.power_factor || 0),
+    powerSeries: hourly.map((row) => ({ time: labelOf(row), active: valueOf(row, 'active_power'), reactive: valueOf(row, 'reactive_power'), apparent: valueOf(row, 'apparent_power') })),
+    composition: [{ name: '有功功率', value: active }, { name: '无功功率', value: reactive }, { name: '功率差额', value: Math.max(0, apparent - active - reactive) }],
+    loadSeries: hourly.map((row) => ({ time: labelOf(row), rate: maxDemand > 0 ? valueOf(row, 'active_power') * 100 / maxDemand : 0 })),
+    events: rows(overview.judgements),
+    advice: [],
+  }
+}
+
+async function loadStatistics(filters: EfficiencyRequest): Promise<EnergyConsumeStatisticsData> {
+  const { overview, drilldown, trend } = await realContext(filters)
+  const comparison = (overview.comparison || {}) as RecordRow
+  const quality = rows(drilldown.quality)
+  return {
+    metrics: [
+      { label: '周期能耗', value: overview.consumption, unit: 'kWh', hint: '真实日统计' },
+      { label: '数据完整率', value: overview.dataCompleteRate, unit: '%', hint: '统计均值' },
+      { label: '环比变化率', value: comparison.periodOverPeriodRate, unit: '%', hint: '相邻周期' },
+      { label: '设备数量', value: ((drilldown.overview || {}) as RecordRow).deviceCount, unit: '台', hint: '筛选范围' },
+    ],
+    cumulativeSeries: trend.map((row) => ({ time: labelOf(row), value: valueOf(row, 'usage_value') })),
+    intervalSeries: trend.map((row) => ({ time: labelOf(row), value: valueOf(row, 'usage_value') })),
+    heatmapSeries: quality.map((row, index) => ({ day: String(row.stat_date || row.device_name || index + 1), slot: String(row.device_name || row.device_id || '设备'), value: Number(row.avg_complete_rate || 0) })),
+    events: rows(overview.judgements),
+    insights: [],
+  }
 }
 
 async function loadPredict(filters: EfficiencyRequest, forecastWindow: '24h' | '7d', riskMode: 'standard' | 'high-risk', loadPerturbation: number) {
-  if (!useMock) return request<DataModelPredictData>(`/energy-efficiency/data-model-predict${toQuery({ ...filters, forecastWindow, riskMode, loadPerturbation } as Record<string, unknown>)}`)
-  await mockDelay()
-  return mockPredict(filters, forecastWindow, riskMode, loadPerturbation)
+  const statistics = await loadStatistics(filters)
+  const historySeries = statistics.cumulativeSeries.map((row) => ({ time: String(row.time), actual: Number(row.value || 0), predict: null, low: null, high: null }))
+  return { metrics: statistics.metrics, version: '真实历史数据', historySeries, forecastSeries: [], riskSeries: [], events: statistics.events, recommendations: [], forecastWindow, riskMode, loadPerturbation } as DataModelPredictData
 }
 
 export async function loadEfficiencyPage(page: EfficiencyPageKind, filters: EfficiencyRequest, options: RecordRow = {}) {
@@ -281,4 +340,9 @@ export async function loadEfficiencyPage(page: EfficiencyPageKind, filters: Effi
   if (page === 'power-efficiency-analysis') return loadAnalysis(filters)
   if (page === 'energy-consume-statistics') return loadStatistics(filters)
   return loadPredict(filters, String(options.forecastWindow || '24h') as '24h' | '7d', String(options.riskMode || 'standard') as 'standard' | 'high-risk', Number(options.loadPerturbation || 1.0))
+}
+
+export async function loadEfficiencyDevices() {
+  const page = await request<{ records: EfficiencyDeviceOption[] }>(`/archive/devices/cards${toQuery({ pageNum: 1, pageSize: 500 })}`)
+  return Array.isArray(page.records) ? page.records : []
 }

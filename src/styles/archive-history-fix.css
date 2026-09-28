@@ -79,3 +79,11 @@
 .device-efficiency-workbench .efficiency-workbench {
   height: 100%;
 }
+
+.archive-runtime-grid--efficiency {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.archive-runtime-grid--efficiency .archive-realtime-card {
+  width: 100%;
+}

@@ -6,7 +6,7 @@ import AppLoadingState from '@/components/app/AppLoadingState.vue'
 import { useAlertRef } from '@/composables/useAppAlert'
 import { useDebouncedTask } from '@/composables/useDebouncedTask'
 import type { RecordRow } from '@/types/domain'
-import { loadEfficiencyPage, type DataModelPredictData, type EfficiencyDeviceOption, type EfficiencyPageKind, type EnergyConsumeStatisticsData, type PowerEfficiencyAnalysisData, type ThreePhaseMonitorData } from '@/api/energyEfficiency'
+import { loadEfficiencyDevices, loadEfficiencyPage, type DataModelPredictData, type EfficiencyDeviceOption, type EfficiencyPageKind, type EnergyConsumeStatisticsData, type PowerEfficiencyAnalysisData, type ThreePhaseMonitorData } from '@/api/energyEfficiency'
 import { loadEfficiencyChartRuntime, type EfficiencyChartRuntime } from '@/utils/chartRuntime'
 
 const props = withDefaults(defineProps<{ page: EfficiencyPageKind; initialDeviceId?: string; showDeviceFilter?: boolean; showPageSwitcher?: boolean; scopeMode?: 'global' | 'device' }>(), { initialDeviceId: '', showDeviceFilter: true, showPageSwitcher: true, scopeMode: 'global' })
@@ -136,7 +136,7 @@ function optionLineSeries(series: Array<RecordRow & { time: string }>, keys: str
   const times = [...new Set(series.map((item) => item.time))]
   return {
     color: ['#2364c8', '#18a8a8', '#f0a646', '#e06459', '#6d5dfc'],
-    tooltip: { trigger: 'axis' },
+    tooltip: { trigger: 'axis', appendToBody: true, extraCssText: 'z-index:99999' },
     legend: { top: 0, right: 6, textStyle: { color: '#61728a', fontSize: 11 } },
     grid: { left: 44, right: 16, top: 38, bottom: 36 },
     dataZoom: [{ type: 'inside' }],
@@ -158,7 +158,7 @@ function optionLineSeries(series: Array<RecordRow & { time: string }>, keys: str
 function optionPhaseCompare(): EChartsCoreOption {
   const rows = threePhasePhaseSummary.value
   return {
-    tooltip: { trigger: 'axis' },
+    tooltip: { trigger: 'axis', appendToBody: true, extraCssText: 'z-index:99999' },
     legend: { top: 0, textStyle: { color: '#61728a', fontSize: 11 } },
     grid: { left: 44, right: 24, top: 38, bottom: 34 },
     xAxis: { type: 'category', data: rows.map((item) => item.phase), axisLabel: { color: '#718096' } },
@@ -194,7 +194,7 @@ function optionStackedArea(series: Array<RecordRow & { time: string }>, keys: st
   const times = [...new Set(series.map((item) => item.time))]
   return {
     color: colors,
-    tooltip: { trigger: 'axis' },
+    tooltip: { trigger: 'axis', appendToBody: true, extraCssText: 'z-index:99999' },
     legend: { top: 0, right: 8, textStyle: { color: '#61728a', fontSize: 11 } },
     grid: { left: 42, right: 16, top: 38, bottom: 36 },
     dataZoom: [{ type: 'inside' }],
@@ -207,7 +207,7 @@ function optionStackedArea(series: Array<RecordRow & { time: string }>, keys: st
 function optionPie(data: Array<{ name: string; value: number }>, colors: string[]): EChartsCoreOption {
   return {
     color: colors,
-    tooltip: { trigger: 'item' },
+    tooltip: { trigger: 'item', appendToBody: true, extraCssText: 'z-index:99999' },
     legend: { bottom: 0, type: 'scroll', textStyle: { color: '#61728a', fontSize: 10 } },
     series: [{ type: 'pie', radius: ['42%', '70%'], center: ['50%', '44%'], label: { fontSize: 10 }, data }],
   }
@@ -218,7 +218,7 @@ function optionHeatmap(data: Array<{ day: string; slot: string; value: number }>
   const slots = [...new Set(data.map((item) => item.slot))]
   const values = data.map((item) => [slots.indexOf(item.slot), days.indexOf(item.day), item.value]) as Array<[number, number, number]>
   return {
-    tooltip: { position: 'top', formatter: (params: any) => { const value = params.value as number[]; return `${days[value[1] ?? -1] || '—'}<br/>${slots[value[0] ?? -1] || '—'}<br/>完整率 ${display(value[2])}%` } },
+    tooltip: { position: 'top', appendToBody: true, extraCssText: 'z-index:99999', formatter: (params: any) => { const value = params.value as number[]; return `${days[value[1] ?? -1] || '—'}<br/>${slots[value[0] ?? -1] || '—'}<br/>完整率 ${display(value[2])}%` } },
     grid: { left: 80, right: 18, top: 20, bottom: 42 },
     xAxis: { type: 'category', data: slots, axisLabel: { fontSize: 9, color: '#718096' } },
     yAxis: { type: 'category', data: days, axisLabel: { fontSize: 10, color: '#718096' } },
@@ -229,7 +229,7 @@ function optionHeatmap(data: Array<{ day: string; slot: string; value: number }>
 
 function optionScatter(data: Array<{ name: string; complete: number; gap: number }>) {
   return {
-    tooltip: { formatter: (params: any) => { const value = params.value as Array<number | string>; return `${value[2] || '—'}<br/>完整率 ${display(value[0])}%<br/>断采 ${display(value[1])} 秒` } },
+    tooltip: { appendToBody: true, extraCssText: 'z-index:99999', formatter: (params: any) => { const value = params.value as Array<number | string>; return `${value[2] || '—'}<br/>完整率 ${display(value[0])}%<br/>断采 ${display(value[1])} 秒` } },
     grid: { left: 44, right: 18, top: 24, bottom: 38 },
     xAxis: { name: '完整率(%)', type: 'value', max: 100, axisLabel: { color: '#718096' }, splitLine: { lineStyle: { color: '#edf2f7' } } },
     yAxis: { name: '断采(秒)', type: 'value', axisLabel: { color: '#718096' }, splitLine: { lineStyle: { color: '#edf2f7' } } },
@@ -242,7 +242,7 @@ function optionRiskHeatmap(data: Array<{ risk: string; time: string; value: numb
   const times = [...new Set(data.map((item) => item.time))]
   const values = data.map((item) => [times.indexOf(item.time), risks.indexOf(item.risk), item.value]) as Array<[number, number, number]>
   return {
-    tooltip: { position: 'top', formatter: (params: any) => { const value = params.value as number[]; return `${risks[value[1] ?? -1] || '—'}<br/>${times[value[0] ?? -1] || '—'}<br/>风险概率 ${display(value[2])}%` } },
+    tooltip: { position: 'top', appendToBody: true, extraCssText: 'z-index:99999', formatter: (params: any) => { const value = params.value as number[]; return `${risks[value[1] ?? -1] || '—'}<br/>${times[value[0] ?? -1] || '—'}<br/>风险概率 ${display(value[2])}%` } },
     grid: { left: 130, right: 18, top: 16, bottom: 38 },
     xAxis: { type: 'category', data: times, axisLabel: { color: '#718096', fontSize: 10 } },
     yAxis: { type: 'category', data: risks, axisLabel: { color: '#718096', fontSize: 10 } },
@@ -253,7 +253,7 @@ function optionRiskHeatmap(data: Array<{ risk: string; time: string; value: numb
 
 function optionTrendBars(data: Array<{ time: string; value: number; peak?: boolean }>) {
   return {
-    tooltip: { trigger: 'axis' },
+    tooltip: { trigger: 'axis', appendToBody: true, extraCssText: 'z-index:99999' },
     grid: { left: 44, right: 18, top: 26, bottom: 36 },
     xAxis: { type: 'category', data: data.map((item) => item.time), axisLabel: { color: '#718096', fontSize: 10 } },
     yAxis: { type: 'value', axisLabel: { color: '#718096' }, splitLine: { lineStyle: { color: '#edf2f7' } } },
@@ -264,7 +264,7 @@ function optionTrendBars(data: Array<{ time: string; value: number; peak?: boole
 function optionForecast(data: Array<{ time: string; actual: number; predict: number | null; low: number | null; high: number | null }>) {
   const times = data.map((item) => item.time)
   return {
-    tooltip: { trigger: 'axis' },
+    tooltip: { trigger: 'axis', appendToBody: true, extraCssText: 'z-index:99999' },
     legend: { top: 0, right: 6, textStyle: { color: '#61728a', fontSize: 11 } },
     grid: { left: 44, right: 18, top: 38, bottom: 36 },
     dataZoom: [{ type: 'inside' }],
@@ -305,11 +305,7 @@ async function renderCharts() {
 }
 
 async function loadDevices() {
-  devices.value = [
-    { id: '101', device_name: '一号配电房总表', device_sn: 'EE-101', org_name: 'A区园区', gateway_name: 'GW-A01' },
-    { id: '102', device_name: '制冷机组总表', device_sn: 'EE-102', org_name: 'A区园区', gateway_name: 'GW-A02' },
-    { id: '103', device_name: '办公楼配电柜', device_sn: 'EE-103', org_name: 'B区园区', gateway_name: 'GW-B01' },
-  ]
+  devices.value = await loadEfficiencyDevices()
 }
 
 async function load() {

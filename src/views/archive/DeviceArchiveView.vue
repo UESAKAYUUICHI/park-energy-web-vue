@@ -2182,8 +2182,8 @@ onBeforeUnmount(() => {
             <button class="active">{{ selectedIsGateway ? '网关概览' : selectedIsSpace ? '空间概览' : selectedIsGroup ? '状态分组' : '组织概览' }}</button>
           </div>
 
-           <div v-if="(!selectedIsDevice && !selectedIsOrg) || ['device', 'inspection', 'runtime', 'efficiency'].includes(activeArchiveTab)" class="archive-runtime-grid">
-            <article class="archive-info-card">
+           <div v-if="(!selectedIsDevice && !selectedIsOrg) || ['device', 'inspection', 'runtime', 'efficiency'].includes(activeArchiveTab)" class="archive-runtime-grid" :class="{ 'archive-runtime-grid--efficiency': activeArchiveTab === 'efficiency' }">
+            <article v-if="activeArchiveTab !== 'efficiency'" class="archive-info-card">
               <div class="archive-section-title">
                 <i></i>
                 <h3>基础信息</h3>
