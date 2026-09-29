@@ -48,7 +48,7 @@ const router = useRouter();
 const session = useSessionStore();
 const error = useAlertRef();
 const workspaceView = computed(() =>
-  String(route.query.view || "") === "inspections"
+  route.name === "operations-inspections" || String(route.query.view || "") === "inspections"
     ? "inspections"
     : "work-orders",
 );
@@ -90,6 +90,7 @@ const taskDate = ref(new Date().toISOString().slice(0, 10));
 const assigneeKeyword = ref("");
 const planAssigneeKeyword = ref("");
 const openedRouteWorkOrderId = ref("");
+let loadSequence = 0;
 const workForm = reactive({
   orgId: "",
   deviceId: "",
@@ -142,18 +143,14 @@ const planForm = reactive<{
 });
 
 const stages = [
-  { key: "PENDING", label: "待分派" },
-  { key: "ASSIGNED", label: "待接单" },
-  { key: "ACCEPTED", label: "已接单" },
+  { key: "TODO", label: "待处理" },
   { key: "PROCESSING", label: "处理中" },
   { key: "VERIFYING", label: "待验收" },
   { key: "CLOSED", label: "已关闭" },
 ];
 const statusTabs = [
   { value: "", label: "全部状态" },
-  { value: "PENDING", label: "待分派" },
-  { value: "ASSIGNED", label: "待接单" },
-  { value: "ACCEPTED", label: "已接单" },
+  { value: "TODO", label: "待处理" },
   { value: "PROCESSING", label: "处理中" },
   { value: "VERIFYING", label: "待验收" },
   { value: "CLOSED", label: "已完成" },
@@ -206,7 +203,8 @@ const workOrderFullDetails = computed(() =>
         ["工单来源", selectedOrder.value.source_type || "—"],
         ["工单类型", selectedOrder.value.work_type || "—"],
         ["优先级", selectedOrder.value.priority || "—"],
-        ["当前状态", selectedOrder.value.status || "—"],
+        ["当前状态", flowStatus(selectedOrder.value.status)],
+        ["设备事实状态", selectedOrder.value.device_state === "RECOVERED" ? `已恢复 · ${formatTime(selectedOrder.value.device_state_time)}` : "等待设备恢复证据"],
         [
           "设备",
           selectedOrder.value.device_name ||
@@ -244,13 +242,15 @@ function canAction(code: string) {
 function setWorkspace(view: "work-orders" | "inspections") {
   status.value = "";
   keyword.value = "";
+  deviceId.value = "";
   if (view === "inspections") inspectionView.value = "tasks";
   void router.replace({
-    path: "/operations/work-orders",
-    query: view === "inspections" ? { view } : {},
+    path: view === "inspections" ? "/operations/inspections" : "/operations/work-orders",
   });
 }
 function countStatus(value: string) {
+  if (value === "TODO") return ["PENDING", "ASSIGNED"].reduce((total, key) => total + Number(statusCounts.value[key] || 0), 0);
+  if (value === "PROCESSING") return ["ACCEPTED", "PROCESSING"].reduce((total, key) => total + Number(statusCounts.value[key] || 0), 0);
   return statusCounts.value[value || "ALL"] || 0;
 }
 function statusTone(value: string) {
@@ -258,10 +258,12 @@ function statusTone(value: string) {
 }
 function stageIndex(row: RecordRow) {
   if (String(row.status) === "CANCELLED") return -1;
-  return Math.max(
-    stages.findIndex((stage) => stage.key === String(row.status)),
-    0,
-  );
+  const current = String(row.status);
+  if (["PENDING", "ASSIGNED"].includes(current)) return 0;
+  if (["ACCEPTED", "PROCESSING"].includes(current)) return 1;
+  if (current === "VERIFYING") return 2;
+  if (current === "CLOSED") return 3;
+  return 0;
 }
 function stageReached(row: RecordRow, index: number) {
   return stageIndex(row) >= index;
@@ -294,6 +296,7 @@ function clearFilters() {
 }
 
 async function load() {
+  const sequence = ++loadSequence;
   loading.value = true;
   workPage.value = 1;
   error.value = "";
@@ -305,11 +308,18 @@ async function load() {
         keyword: keyword.value || undefined,
         deviceId: deviceId.value || undefined,
       };
+      const backendStatus = ["TODO", "PROCESSING"].includes(status.value) ? undefined : status.value || undefined;
       const [page, counts] = await Promise.all([
-        workOrders({ ...query, status: status.value || undefined }),
+        workOrders({ ...query, status: backendStatus, statusGroup: ["TODO", "PROCESSING"].includes(status.value) ? status.value : undefined }),
         workOrderStatusCounts(query),
       ]);
-      rows.value = page.records;
+      if (sequence !== loadSequence) return;
+      rows.value = page.records.filter((row) => {
+        const current = String(row.status);
+        if (status.value === "TODO") return ["PENDING", "ASSIGNED"].includes(current);
+        if (status.value === "PROCESSING") return ["ACCEPTED", "PROCESSING"].includes(current);
+        return true;
+      });
       statusCounts.value = counts;
       await openRoutedWorkOrder();
     } else {
@@ -323,18 +333,21 @@ async function load() {
           deviceId: deviceId.value || undefined,
         }),
       ]);
+      if (sequence !== loadSequence) return;
       plans.value = planPage.records;
       tasks.value = taskPage.records;
     }
+    if (sequence !== loadSequence) return;
     lastSyncedAt.value = new Date().toLocaleTimeString("zh-CN", {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
     });
   } catch (e) {
+    if (sequence !== loadSequence) return;
     error.value = e instanceof Error ? e.message : "运维数据读取失败";
   } finally {
-    loading.value = false;
+    if (sequence === loadSequence) loading.value = false;
   }
 }
 async function loadLookups() {
@@ -380,10 +393,8 @@ function nextAction(row: RecordRow) {
   const current = String(row.status);
   if (current === "PENDING" && canAction("ops:workorder:assign"))
     return { label: "分派", action: "assign" };
-  if (current === "ASSIGNED" && canAction("ops:workorder:accept"))
-    return { label: "确认接单", action: "accept" };
-  if (current === "ACCEPTED" && canAction("ops:workorder:execute"))
-    return { label: "登记到场", action: "arrive" };
+  if (["ASSIGNED", "ACCEPTED"].includes(current) && canAction("ops:workorder:execute"))
+    return { label: "开始处理", action: "start" };
   if (current === "PROCESSING" && canAction("ops:workorder:execute"))
     return { label: "提交处理", action: "complete" };
   if (current === "VERIFYING" && canAction("ops:workorder:verify"))
@@ -393,17 +404,21 @@ function nextAction(row: RecordRow) {
 function flowAction(value: unknown) {
   const normalized = String(value || '').trim().toUpperCase()
   return ({
-    CREATE: '创建', CREATED: '已创建', ASSIGN: '分派', ACCEPT: '接单', ARRIVE: '到场',
-    COMPLETE: '提交处理', VERIFY: '验收关闭', CANCEL: '取消', CLOSE: '关闭',
+    CREATE: '创建', CREATED: '已创建', ASSIGN: '分派', ACCEPT: '接单', ARRIVE: '到场', START: '开始处理',
+    COMPLETE: '提交处理', VERIFY: '验收关闭', CANCEL: '取消', CLOSE: '关闭', DEVICE_RECOVERED: '设备恢复',
   } as Record<string, string>)[normalized] || String(value || '—')
 }
 function flowStatus(value: unknown) {
   const normalized = String(value || '').trim().toUpperCase()
-  return ({ PENDING: '待分派', ASSIGNED: '已分派', ACCEPTED: '已接单', PROCESSING: '处理中', VERIFYING: '待验收', CLOSED: '已关闭', CANCELLED: '已取消', CREATE: '创建', CREATED: '已创建' } as Record<string, string>)[normalized] || String(value || '—')
+  return ({ PENDING: '待处理', ASSIGNED: '待处理', ACCEPTED: '处理中', PROCESSING: '处理中', VERIFYING: '待验收', CLOSED: '已关闭', CANCELLED: '已取消', CREATE: '创建', CREATED: '已创建' } as Record<string, string>)[normalized] || String(value || '—')
+}
+function inspectionStatusLabel(value: unknown) {
+  const normalized = String(value || "PENDING").toUpperCase();
+  return ({ PENDING: "待巡检", PROCESSING: "巡检中", COMPLETED: "正常完成", ABNORMAL: "发现异常", RESOLVED: "异常已闭环" } as Record<string, string>)[normalized] || normalized;
 }
 async function runDirect(row: RecordRow, action: string) {
   try {
-    await workOrderAction(row.id, action, {});
+    await workOrderAction(row.id, action, { workflowVersion: Number(row.workflow_version || 0) });
     await load();
   } catch (e) {
     error.value = e instanceof Error ? e.message : "工单流转失败";
@@ -436,7 +451,7 @@ async function openAction(row: RecordRow, action: string) {
 async function submitAction() {
   if (!activeOrder.value) return;
   try {
-    const body: RecordRow = {};
+    const body: RecordRow = { workflowVersion: Number(activeOrder.value.workflow_version || 0) };
     if (activeAction.value === "assign")
       body.assigneeUserId = Number(actionForm.assigneeUserId);
     if (activeAction.value === "complete") {
@@ -732,12 +747,16 @@ onMounted(async () => {
             <div class="order-suggestion">
               <Lightbulb :size="15" /><span
                 ><b>{{
-                  row.alarm_rule_name ||
-                  (row.alarm_id ? "关联设备告警" : "人工报修")
+                  row.device_state === "RECOVERED"
+                    ? "设备状态已恢复，等待人工验收"
+                    : row.alarm_rule_name ||
+                      (row.alarm_id ? "关联设备告警" : "人工报修")
                 }}</b
                 ><small>{{
-                  row.alarm_suggestion ||
-                  "根据问题描述完成现场诊断并记录处理结果"
+                  row.device_state === "RECOVERED"
+                    ? `恢复证据时间：${formatTime(row.device_state_time)}`
+                    : row.alarm_suggestion ||
+                      "根据问题描述完成现场诊断并记录处理结果"
                 }}</small></span
               >
             </div>
@@ -790,7 +809,7 @@ onMounted(async () => {
                 <Eye :size="16" /></button
               ><button
                 v-if="
-                  ['accept', 'arrive'].includes(String(nextAction(row)?.action))
+                  ['accept', 'arrive', 'start'].includes(String(nextAction(row)?.action))
                 "
                 class="link-btn"
                 @click="runDirect(row, String(nextAction(row)?.action))"
@@ -909,7 +928,7 @@ onMounted(async () => {
                 >
                   <div>
                     <span class="inspection-status">{{
-                      task.status || "PENDING"
+                      inspectionStatusLabel(task.status)
                     }}</span
                     ><small>{{ task.task_no }}</small>
                   </div>

@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Compon
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { routeRecords } from '@/router/routes'
 import { useSessionStore } from '@/stores/session'
-import { Archive, BarChart3, Bell, Boxes, Building2, Cable, ChartNoAxesCombined, CircleDollarSign, ClipboardCheck, Compass, Cpu, Crosshair, FileCheck2, FileClock, Gauge, KeyRound, LayoutDashboard, LogOut, Menu, Network, RadioReceiver, ReceiptText, Router, Settings2, ShieldCheck, Siren, SlidersHorizontal, Tags, UserCircle, Users, Wrench } from '@lucide/vue'
+import { Archive, BadgeCheck, BarChart3, Bell, Blocks, Boxes, Building2, Cable, ChartNoAxesCombined, CircleDollarSign, ClipboardCheck, ClipboardList, Compass, Cpu, Crosshair, Factory, FileCheck2, FileClock, Gauge, KeyRound, Landmark, LayoutDashboard, Link2, ListChecks, LogOut, Menu, Network, PackageSearch, RadioReceiver, ReceiptText, Router, ScanSearch, Settings2, ShieldCheck, Siren, SlidersHorizontal, TableProperties, Tags, UserCircle, UsersRound, Workflow, Wrench } from '@lucide/vue'
 
 interface NavItem { name: string; path: string; title: string; permission?: string; icon: Component }
 interface NavGroup { key: string; label: string; icon: Component; items?: NavItem[]; sections?: Array<{ label: string; items: NavItem[] }>; forceCollapsible?: boolean }
@@ -29,32 +29,33 @@ const navIcons: Record<string, Component> = {
   dashboard: LayoutDashboard,
   'energy-screen': Gauge,
   'device-archive-org-tree': Network,
-  'device-archive-devices': Gauge,
-  'product-catalog': Boxes,
+  'device-archive-devices': Cpu,
+  'product-catalog': PackageSearch,
   'protocol-catalog': Cable,
   'global-attributes': Tags,
   'global-points': Crosshair,
-  'power-efficiency': BarChart3,
+  'power-efficiency': ChartNoAxesCombined,
   'alarms-events': Bell,
-  'billing-overview': LayoutDashboard,
+  'billing-overview': Landmark,
   'billing-rules-workspace': ClipboardCheck,
   'billing-payment-workspace': ReceiptText,
   'billing-archive-workspace': FileCheck2,
-  'access-diagnostic': RadioReceiver,
-  'edge-config': Cable,
-  'access-control': SlidersHorizontal,
+  'access-diagnostic': ScanSearch,
+  'edge-config': SlidersHorizontal,
+  'access-control': ShieldCheck,
   'archive-spaces': Building2,
   'archive-gateways': Router,
-  'archive-device-types': Tags,
-  'archive-point-definitions': Crosshair,
+  'archive-device-types': Blocks,
+  'archive-point-definitions': TableProperties,
   'alarms-protocols': Siren,
-  'operations-work-orders': Wrench,
-  'system-users': Users,
-  'system-tenants': Users,
-  'system-roles': ShieldCheck,
+  'operations-work-orders': ClipboardList,
+  'operations-inspections': ListChecks,
+  'system-users': UsersRound,
+  'system-tenants': Factory,
+  'system-roles': BadgeCheck,
   'system-permissions': KeyRound,
-  'system-rbac-workbench': Wrench,
-  'system-user-org-bindings': Building2,
+  'system-rbac-workbench': Workflow,
+  'system-user-org-bindings': Link2,
   'system-audit': FileClock,
 }
 const groupIcons: Record<string, Component> = {
@@ -77,7 +78,7 @@ const nav = computed<NavGroup[]>((): NavGroup[] => [
   { key: 'assets', label: '组织和资产', icon: groupIcon('assets'), items: [item('device-archive-org-tree'), item('device-archive-devices')] },
   { key: 'catalog', label: '模型与字典', icon: groupIcon('catalog'), items: [item('product-catalog'), item('protocol-catalog'), item('global-attributes'), item('global-points')] },
   { key: 'efficiency', label: '能效与分析', icon: groupIcon('efficiency'), items: [item('power-efficiency')], forceCollapsible: true },
-  { key: 'operations', label: '告警与运维', icon: groupIcon('operations'), items: [item('alarms-events'), item('alarms-protocols'), item('operations-work-orders')] },
+  { key: 'operations', label: '告警与运维', icon: groupIcon('operations'), items: [item('alarms-events'), item('alarms-protocols'), item('operations-work-orders'), item('operations-inspections')] },
   { key: 'access', label: '设备接入', icon: groupIcon('access'), items: [item('access-diagnostic'), item('edge-config'), item('access-control')] },
   { key: 'billing', label: '结算与财务', icon: groupIcon('revenue'), items: [item('billing-overview'), item('billing-rules-workspace'), item('billing-payment-workspace'), item('billing-archive-workspace')] },
   { key: 'system', label: '系统治理', icon: groupIcon('system'), items: isAdmin.value ? [item('archive-spaces'), item('archive-gateways'), item('archive-device-types'), item('archive-point-definitions'), item('system-tenants'), item('system-users'), item('system-roles'), item('system-permissions'), item('system-rbac-workbench'), item('system-user-org-bindings'), item('system-audit')] : [item('system-rbac-workbench'), item('system-audit')] },

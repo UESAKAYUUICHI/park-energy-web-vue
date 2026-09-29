@@ -82,7 +82,7 @@ function protocolPoints(row: RecordRow) {
   return Array.isArray(value) ? value as RecordRow[] : []
 }
 function protocolStatus(row: RecordRow) {
-  const status = String(field(row, 'status', 'protocol_status', 'protocolStatus')).toUpperCase()
+  const status = String(field(row, 'lifecycle_status', 'lifecycleStatus', 'status', 'protocol_status', 'protocolStatus')).toUpperCase()
   if (status === 'PUBLISHED' || status === 'ACTIVE') return '已发布'
   if (status === 'DISABLED' || Number(field(row, 'enabled')) === 0) return '已停用'
   return '草稿'

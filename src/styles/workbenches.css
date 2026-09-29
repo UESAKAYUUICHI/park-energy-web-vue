@@ -3004,7 +3004,9 @@
   font-weight: 700;
 }
 .order-status-tabs .status-pending > i,
-.order-status-tabs .status-pending > em {
+.order-status-tabs .status-pending > em,
+.order-status-tabs .status-todo > i,
+.order-status-tabs .status-todo > em {
   background: #fff0e7;
   color: #bb5b2b;
 }

@@ -16,6 +16,34 @@
 .app-select-menu-enter-active, .app-select-menu-leave-active { transition: opacity .16s ease, transform .16s ease; }
 .app-select-menu-enter-from, .app-select-menu-leave-to { opacity: 0; transform: translateY(-4px); }
 
+/* 组织档案树的站点选择：打开时保持面板与箭头动作一致。 */
+.archive-site-field .app-select-trigger {
+  transition: border-color .2s ease, box-shadow .2s ease, background-color .2s ease, transform .16s ease;
+}
+.archive-site-field .app-select-trigger:active {
+  transform: scale(.985);
+}
+.archive-site-field .app-select.open .app-select-trigger {
+  background: #f8fbff;
+  box-shadow: 0 0 0 3px rgb(76 141 255 / 11%), 0 5px 12px rgb(23 55 92 / 8%);
+}
+.archive-site-field .app-select-menu {
+  transform-origin: top center;
+  transition: opacity .2s ease, transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s ease;
+}
+.archive-site-field .app-select-menu-enter-from,
+.archive-site-field .app-select-menu-leave-to {
+  opacity: 0;
+  transform: translateY(-8px) scaleY(.96);
+}
+.archive-site-field .app-select-option {
+  transition: background-color .16s ease, color .16s ease, padding-left .16s ease;
+}
+.archive-site-field .app-select-option:hover,
+.archive-site-field .app-select-option.active {
+  padding-left: 14px;
+}
+
 /* Loading is now component-owned; empty data must never be mistaken for a loading state. */
 .app-table > .empty-state, .order-table-body > .empty-state, .alarm-event-main > .empty-state { font-size: 12px; }
 .app-table > .empty-state::before, .app-table > .empty-state::after, .order-table-body > .empty-state::before, .order-table-body > .empty-state::after, .alarm-event-main > .empty-state::before, .alarm-event-main > .empty-state::after { display: none; content: none; }

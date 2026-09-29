@@ -9,11 +9,11 @@ import type { RecordRow } from '@/types/domain'
 import { loadEfficiencyDevices, loadEfficiencyPage, type DataModelPredictData, type EfficiencyDeviceOption, type EfficiencyPageKind, type EnergyConsumeStatisticsData, type PowerEfficiencyAnalysisData, type ThreePhaseMonitorData } from '@/api/energyEfficiency'
 import { loadEfficiencyChartRuntime, type EfficiencyChartRuntime } from '@/utils/chartRuntime'
 
-const props = withDefaults(defineProps<{ page: EfficiencyPageKind; initialDeviceId?: string; showDeviceFilter?: boolean; showPageSwitcher?: boolean; scopeMode?: 'global' | 'device' }>(), { initialDeviceId: '', showDeviceFilter: true, showPageSwitcher: true, scopeMode: 'global' })
+const props = withDefaults(defineProps<{ page: EfficiencyPageKind; initialDeviceId?: string; initialOrgId?: string; showDeviceFilter?: boolean; showPageSwitcher?: boolean; showHeadline?: boolean; scopeMode?: 'global' | 'device'; compact?: boolean; dense?: boolean }>(), { initialDeviceId: '', initialOrgId: '', showDeviceFilter: true, showPageSwitcher: true, showHeadline: true, scopeMode: 'global', compact: false, dense: false })
 const emit = defineEmits<{ 'update:context': [value: { deviceId: string; startDate: string; endDate: string }], 'switch-page': [value: EfficiencyPageKind] }>()
 
 const deviceId = ref(props.initialDeviceId || '')
-const orgId = ref('')
+const orgId = ref(props.initialOrgId || '')
 const startDate = ref(daysAgo(29))
 const endDate = ref(today())
 const loading = ref(false)
@@ -105,6 +105,7 @@ const periodHint = computed(() => '')
 
 const normalizedData = computed(() => pageData.value)
 const metrics = computed(() => rowsOf(normalizedData.value.metrics))
+const displayedMetrics = computed(() => props.compact ? metrics.value.slice(0, 4) : metrics.value)
 const events = computed(() => rowsOf(normalizedData.value.events))
 const isThreePhase = computed(() => props.page === 'three-phase-monitor')
 const isAnalysis = computed(() => props.page === 'power-efficiency-analysis')
@@ -339,14 +340,15 @@ function jumpTo(page: EfficiencyPageKind) { if (page === props.page) return; emi
 watch(() => props.page, (page) => { disposeCharts(); pageData.value = createEmptyPageData(page); void load() })
 watch([deviceId, orgId, startDate, endDate, timeGranularity, forecastWindow, riskMode, loadPerturbation], () => { scheduleLoad(load) })
 watch(orgId, (value) => { if (value && !visibleDevices.value.some((item) => String(item.id) === deviceId.value)) deviceId.value = '' })
-watch(() => props.initialDeviceId, (value) => { if (props.scopeMode === 'device' && value) deviceId.value = value })
+watch(() => props.initialDeviceId, (value) => { if (props.scopeMode === 'device') deviceId.value = value || '' })
+watch(() => props.initialOrgId, (value) => { if (props.scopeMode === 'global') orgId.value = value || '' })
 watch([pageData], () => { void renderCharts() }, { deep: true })
 onMounted(() => { void loadDevices(); void load(); window.addEventListener('resize', renderCharts) })
 onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resize', renderCharts); disposeCharts() })
 </script>
 
 <template>
-  <section class="efficiency-workbench">
+  <section class="efficiency-workbench" :class="{ 'efficiency-workbench--compact': props.compact, 'efficiency-workbench--dense': props.dense }">
     <article class="efficiency-filter-card">
       <div class="efficiency-filter-fields">
         <label v-if="props.scopeMode === 'global'" class="field"><span>园区 / 组织</span><select v-model="orgId"><option value="">全部授权范围</option><option v-for="org in orgOptions" :key="org.id" :value="org.id">{{ org.name }}</option></select></label>
@@ -354,9 +356,9 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
         <label class="field"><span>{{ periodLabel }}</span><input v-model="startDate" type="date"><small v-if="periodHint" class="field-hint">{{ periodHint }}</small></label>
         <label class="field"><span>结束日期</span><input v-model="endDate" type="date"></label>
         <div class="efficiency-filter-actions">
-          <button class="btn-primary" :disabled="loading" @click="refresh">查询</button>
+          <button v-if="!props.compact" class="btn-primary" :disabled="loading" @click="refresh">查询</button>
           <button class="quiet" :disabled="loading" title="手动刷新数据" @click="refresh"><RefreshCw :size="14" :class="{ spinning: loading }" />刷新</button>
-          <button class="quiet" @click="reset">重置</button>
+          <button v-if="!props.compact" class="quiet" @click="reset">重置</button>
         </div>
       </div>
     </article>
@@ -366,7 +368,7 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
 
     <template v-else>
       <div class="efficiency-workbench-body">
-        <div class="efficiency-page-headline">
+        <div v-if="!props.compact && props.showHeadline" class="efficiency-page-headline">
           <div>
             <p>POWER · EFFICIENCY · QUALITY</p>
             <h2>{{ pageTitle }}</h2>
@@ -380,13 +382,13 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
         </div>
 
         <div class="efficiency-metric-strip">
-          <article v-for="metric in metrics" :key="String(metric.label)" class="efficiency-metric-card"><span>{{ metric.label }}</span><strong>{{ display(metric.value) }}<small>{{ metric.unit }}</small></strong><em :class="String(metric.status || 'normal')">{{ metric.hint || '当前统计' }}</em></article>
+          <article v-for="metric in displayedMetrics" :key="String(metric.label)" class="efficiency-metric-card"><span>{{ metric.label }}</span><strong>{{ display(metric.value) }}<small>{{ metric.unit }}</small></strong><em :class="String(metric.status || 'normal')">{{ metric.hint || '当前统计' }}</em></article>
         </div>
         <div class="efficiency-scroll-shell">
           <div v-if="isThreePhase" class="page-layout three-phase-layout">
             <div class="page-main-frame page-main-frame--full">
               <div class="page-main-grid">
-                <article class="panel chart-panel">
+                <article v-if="!props.compact" class="panel chart-panel">
                   <div class="panel-head"><h3>三相电压 / 电流对比</h3><small>双轴联动，异常相高亮</small></div>
                   <div v-if="threePhasePhaseSummary.length" :ref="(el) => setChartElement('three-phase-compare', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
@@ -401,7 +403,7 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
                   <div v-if="threePhaseCurrentSeries.length" :ref="(el) => setChartElement('three-phase-current', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
-                <article class="panel chart-panel">
+                <article v-if="!props.compact" class="panel chart-panel">
                   <div class="panel-head"><h3>电网频率质量</h3><small>观察频率稳定性</small></div>
                   <div v-if="threePhaseFrequencySeries.length" :ref="(el) => setChartElement('three-phase-frequency', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
@@ -418,7 +420,7 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
                   <div v-if="analysisPowerSeries.length" :ref="(el) => setChartElement('analysis-power', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
-                <article class="panel chart-panel">
+                <article v-if="!props.compact" class="panel chart-panel">
                   <div class="panel-head"><h3>功率构成</h3><small>视在功率占比</small></div>
                   <div v-if="analysisComposition.length" :ref="(el) => setChartElement('analysis-composition', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
@@ -428,7 +430,7 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
                   <div v-if="analysisLoadSeries.length" :ref="(el) => setChartElement('analysis-load', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
-                <article class="panel chart-panel">
+                <article v-if="!props.compact" class="panel chart-panel">
                   <div class="panel-head"><h3>功率因数仪表盘</h3><small>企业级分段配色</small></div>
                   <div v-if="analysis.gaugeValue !== null && analysis.gaugeValue !== undefined" :ref="(el) => setChartElement('analysis-gauge', el as HTMLElement)" class="chart-fill gauge-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
@@ -450,7 +452,7 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
                   <div v-if="statisticsIntervalSeries.length" :ref="(el) => setChartElement('statistics-interval', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
-                <article class="panel chart-panel span-2">
+                <article v-if="!props.compact" class="panel chart-panel span-2">
                   <div class="panel-head"><h3>采集完整率热力图</h3><small>时段与星期维度</small></div>
                   <div v-if="statisticsHeatmapSeries.length" :ref="(el) => setChartElement('statistics-heatmap', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
@@ -541,6 +543,43 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
 .predict-version{margin-left:auto;padding:6px 10px;border:1px solid #d7e5f4;border-radius:999px;background:#f7fbff;color:#29486d;font-size:11px;font-weight:700}
 .chart-empty{flex:1;min-height:0;margin:0;display:grid;place-content:center;justify-items:center;gap:9px;color:#899caf;font-size:12px;line-height:1.3;text-align:center}
 .chart-empty::before{content:"";box-sizing:border-box;width:28px;height:21px;border:1.5px solid #9eb2c8;border-radius:4px;background:linear-gradient(145deg,transparent 47%,#c4d1df 48% 52%,transparent 53%);box-shadow:inset 0 -5px 0 #f4f7fa}
-@media (max-width:1180px){.page-layout{grid-template-columns:1fr}.event-rail{order:2;min-height:240px}.page-main-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.span-2{grid-column:1 / -1}.predict-version{margin-left:0}}
-@media (max-width:900px){.efficiency-metric-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}@media (max-width:760px){.efficiency-workbench{overflow:hidden}.efficiency-workbench-body{overflow:hidden}.efficiency-page-headline{align-items:flex-start;flex-direction:column}.page-layout,.page-main-grid{grid-template-columns:1fr}.span-2{grid-column:auto}.chart-panel{height:240px;min-height:220px}.gauge-fill{min-height:220px}.field,.field.wide{min-width:0;width:100%}.efficiency-filter-actions{margin-left:0}.predict-toolbar input[type='range']{min-width:0;width:100%}.efficiency-metric-strip{grid-template-columns:1fr}}
+.efficiency-workbench--dense{gap:8px}
+.efficiency-workbench--dense .efficiency-filter-card{padding:8px 10px;border-radius:4px;box-shadow:none}
+.efficiency-workbench--dense .efficiency-filter-fields{display:grid;grid-template-columns:minmax(145px,.8fr) minmax(210px,1.2fr) repeat(2,minmax(135px,.72fr)) auto;align-items:end;gap:8px}
+.efficiency-workbench--dense .field,.efficiency-workbench--dense .field.wide{min-width:0;width:auto;gap:3px}
+.efficiency-workbench--dense .field span{font-size:10px}
+.efficiency-workbench--dense .field input,.efficiency-workbench--dense .field select{height:32px;border-radius:4px;font-size:11px}
+.efficiency-workbench--dense .efficiency-filter-actions{margin-left:0;gap:5px}
+.efficiency-workbench--dense .efficiency-filter-actions button{height:32px;padding:0 9px;font-size:11px}
+.efficiency-workbench--dense .efficiency-workbench-body{gap:8px}
+.efficiency-workbench--dense .efficiency-metric-strip{gap:0;overflow:hidden;border:1px solid #dce7f3;border-radius:4px;background:#fff}
+.efficiency-workbench--dense .efficiency-metric-card{padding:7px 10px;border:0;border-right:1px solid #e4ecf5;border-radius:0;background:transparent}
+.efficiency-workbench--dense .efficiency-metric-card:last-child{border-right:0}
+.efficiency-workbench--dense .efficiency-metric-card strong{margin-top:2px;font-size:17px}
+.efficiency-workbench--dense .efficiency-metric-card em{margin-top:2px}
+.efficiency-workbench--dense .efficiency-scroll-shell{overflow:auto;padding-right:2px;scrollbar-width:thin}
+.efficiency-workbench--dense .page-main-grid{gap:8px}
+.efficiency-workbench--dense .panel{border-radius:4px}
+.efficiency-workbench--dense .chart-panel{height:clamp(210px,25vh,280px);min-height:210px}
+.efficiency-workbench--dense .panel-head{padding:8px 10px 0}
+.efficiency-workbench--dense .panel-head h3{font-size:12px}
+.efficiency-workbench--compact{gap:8px}
+.efficiency-workbench--compact .efficiency-filter-card{padding:8px 10px;border-radius:6px;box-shadow:none;background:#fbfcfe}
+.efficiency-workbench--compact .efficiency-filter-fields{display:grid;grid-template-columns:repeat(2,minmax(135px,.75fr)) minmax(150px,.65fr) minmax(150px,.65fr) auto;align-items:end;gap:7px}
+.efficiency-workbench--compact .field,.efficiency-workbench--compact .field.wide{min-width:0;width:auto;gap:3px}
+.efficiency-workbench--compact .field input,.efficiency-workbench--compact .field select{height:30px;border-radius:5px;font-size:11px}
+.efficiency-workbench--compact .efficiency-filter-actions{margin-left:0}
+.efficiency-workbench--compact .efficiency-filter-actions button{height:30px;padding:0 10px;font-size:11px}
+.efficiency-workbench--compact .efficiency-workbench-body{gap:8px}
+.efficiency-workbench--compact .efficiency-metric-strip{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.efficiency-workbench--compact .efficiency-metric-card{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto;align-items:center;gap:2px 8px;padding:7px 9px;border-radius:6px;background:#fbfcfe}
+.efficiency-workbench--compact .efficiency-metric-card strong{grid-column:2;grid-row:1 / 3;margin:0;font-size:17px;text-align:right}
+.efficiency-workbench--compact .efficiency-metric-card em{margin:0}
+.efficiency-workbench--compact .efficiency-scroll-shell,.efficiency-workbench--compact .page-layout,.efficiency-workbench--compact .page-main-frame,.efficiency-workbench--compact .page-main-grid{height:100%;min-height:0}
+.efficiency-workbench--compact .page-main-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;align-content:stretch}
+.efficiency-workbench--compact .chart-panel{height:auto;min-height:220px;border-radius:6px}
+.efficiency-workbench--compact .panel-head{padding:9px 10px 0}
+.efficiency-workbench--compact .panel-head h3{font-size:12px}
+@media (max-width:1180px){.page-layout{grid-template-columns:1fr}.event-rail{order:2;min-height:240px}.page-main-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.span-2{grid-column:1 / -1}.predict-version{margin-left:0}.efficiency-workbench--dense .efficiency-filter-fields{grid-template-columns:repeat(2,minmax(0,1fr)) auto}}
+@media (max-width:900px){.efficiency-metric-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.efficiency-workbench--dense .efficiency-metric-card:nth-child(2){border-right:0}.efficiency-workbench--dense .efficiency-metric-card:nth-child(-n+2){border-bottom:1px solid #e4ecf5}.efficiency-workbench--compact .efficiency-filter-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.efficiency-workbench--compact .efficiency-metric-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}@media (max-width:760px){.efficiency-workbench{overflow:hidden}.efficiency-workbench-body{overflow:hidden}.efficiency-page-headline{align-items:flex-start;flex-direction:column}.page-layout,.page-main-grid{grid-template-columns:1fr}.span-2{grid-column:auto}.chart-panel{height:240px;min-height:220px}.gauge-fill{min-height:220px}.field,.field.wide{min-width:0;width:100%}.efficiency-filter-actions{margin-left:0}.predict-toolbar input[type='range']{min-width:0;width:100%}.efficiency-metric-strip{grid-template-columns:1fr}.efficiency-workbench--dense .efficiency-filter-fields{grid-template-columns:1fr}.efficiency-workbench--dense .efficiency-metric-card{border-right:0;border-bottom:1px solid #e4ecf5}.efficiency-workbench--dense .efficiency-metric-card:last-child{border-bottom:0}.efficiency-workbench--compact .efficiency-filter-fields,.efficiency-workbench--compact .efficiency-metric-strip,.efficiency-workbench--compact .page-main-grid{grid-template-columns:1fr}.efficiency-workbench--compact .chart-panel{height:220px}}
 </style>

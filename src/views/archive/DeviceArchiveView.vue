@@ -3,7 +3,7 @@ import '../../styles/archive-history-fix.css'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useAlertRef } from '@/composables/useAppAlert'
 import { useRoute, useRouter } from 'vue-router'
-import { AlertTriangle, BarChart3, Building2, ChevronDown, ChevronRight, Copy, Cpu, FileText, Pencil, RadioTower, RefreshCw, Search, Trash2, X } from '@lucide/vue'
+import { AlertTriangle, BarChart3, ChevronDown, ChevronRight, Copy, FileText, Pencil, RadioTower, RefreshCw, Search, Trash2, X } from '@lucide/vue'
 import type { ECharts, EChartsCoreOption } from 'echarts/core'
 import AppConfirmDialog from '@/components/app/AppConfirmDialog.vue'
 import AppDialog from '@/components/app/AppDialog.vue'
@@ -188,7 +188,7 @@ const form = reactive<ArchiveForm>({
   meter_factor: 1,
   quality_gate_start_date: formatDateInput(new Date()),
 })
-const activeArchiveTab = ref<'device' | 'inspection' | 'runtime' | 'efficiency' | 'history' | 'alarm'>('device')
+const activeArchiveTab = ref<'device' | 'inspection' | 'runtime' | 'efficiency' | 'history' | 'alarm' | 'gateway-devices'>('device')
 const deviceEfficiencyTab = ref<'three-phase-monitor' | 'power-efficiency-analysis' | 'energy-consume-statistics'>('power-efficiency-analysis')
 const detailWorkspaceTab = ref<'overview' | 'alarms' | 'billing' | 'attributes' | 'points'>('overview')
 const settlementSwitching = ref(false)
@@ -267,6 +267,7 @@ const selectedIsOrg = computed(() => selectedNode.value?.nodeType === 'ORG')
 const selectedIsSpace = computed(() => selectedNode.value?.nodeType === 'SPACE')
 const selectedIsGroup = computed(() => selectedNode.value?.nodeType === 'GROUP')
 const selectedCanMutate = computed(() => ['ORG', 'GATEWAY'].includes(String(selectedNode.value?.nodeType)))
+const selectedCanDelete = computed(() => ['ORG', 'GATEWAY', 'DEVICE'].includes(String(selectedNode.value?.nodeType)))
 const deviceGatewayFilterOptions = computed(() => {
   if (!deviceRootOrgIds.value.length) return [] as RecordRow[]
   const ids = new Set<string>(deviceRootOrgIds.value)
@@ -363,6 +364,12 @@ const inspectionRecords = computed(() => (profile.value.inspectionRecords || [])
 const energyTrend = computed(() => (profile.value.energyTrend || []) as RecordRow[])
 const alarmTrend = computed(() => (profile.value.alarmTrend || []) as RecordRow[])
 const realtimeSnapshots = computed(() => (profile.value.realtimeSnapshots || []) as RecordRow[])
+const orgAssetTopology = computed(() => (profile.value.assetTopology || []) as RecordRow[])
+const orgSpaces = computed(() => (profile.value.spaces || []) as RecordRow[])
+const orgActiveTenants = computed(() => (profile.value.activeTenants || []) as RecordRow[])
+const orgActiveContracts = computed(() => (profile.value.activeContracts || []) as RecordRow[])
+const orgGateways = computed(() => (profile.value.gateways || []) as RecordRow[])
+const orgDevices = computed(() => (profile.value.devices || []) as RecordRow[])
 const pointDefinitions = computed(() => ((profile.value.points as RecordRow | undefined)?.definitions || []) as RecordRow[])
 const metricPointOptions = computed(() => pointDefinitions.value.filter((item) => Number(item.enabled ?? 1) === 1))
 const metricPointGroupOptions = computed(() => [...new Set(metricPointOptions.value.map((item) => String(item.business_role || item.data_type || item.group_name || '未分组')).filter(Boolean))])
@@ -416,9 +423,9 @@ const alarmVisibleColumns = computed(() => alarmTableColumns.value.filter((colum
 const filteredRecentAlarms = computed(() => {
   const keyword = alarmSearchKeyword.value.trim().toLowerCase()
   return recentAlarms.value.filter((row) => {
-    if (!alarmVisibleColumns.value.length) return false
     if (!keyword) return true
-    return alarmVisibleColumns.value.some((column) => String(archiveFieldValue(column, row[column]) ?? '').toLowerCase().includes(keyword))
+    return ['device_name', 'device_sn', 'alarm_type', 'alarm_level', 'point_code', 'deal_status', 'work_order_no', 'work_order_status']
+      .some((column) => String(archiveFieldValue(column, row[column]) ?? '').toLowerCase().includes(keyword))
   })
 })
 const detailAlarmStatusOptions = computed(() => [...new Set(recentAlarms.value.map((row) => String(row.deal_status || '').trim()).filter(Boolean))])
@@ -488,7 +495,7 @@ const periodHistorySeriesKeys = computed(() => [...new Set(periodHistoryChartRow
 const billingStatCards = computed(() => [
   ['可计费测点', `${pointDefinitions.value.filter((item) => Number(item.billable) === 1).length} 个`],
   ['本期计量点数', `${periodHistoryRows.value.length} 条`],
-  ['本期累计用量', `${periodHistoryRows.value.reduce((sum, row) => sum + Number(row.usage_value ?? row.value ?? row.avg_value ?? 0), 0).toFixed(2)}`],
+  ['本期累计用量', formatNormalNumber(periodHistoryRows.value.reduce((sum, row) => sum + Number(row.usage_value ?? row.value ?? row.avg_value ?? 0), 0))],
   ['数据完整率', `${Number(detailDevice.value.quality_threshold_pct || 80).toFixed(0)}% 门槛`],
 ])
 const realtimeLookup = computed<Record<string, unknown>>(() => {
@@ -544,6 +551,7 @@ const selectedBasicInfo = computed(() => {
   }
   return rows.filter((item) => showAllData.value || !isMissingValue(item[1]))
 })
+const selectedGatewayProfile = computed<RecordRow>(() => (profile.value.gateway || {}) as RecordRow)
 const detailDevice = computed(() => (profile.value.device || {}) as RecordRow)
 const modelAttributes = computed(() => Array.isArray(profile.value.modelAttributes) ? profile.value.modelAttributes as RecordRow[] : [])
 const billableTotalPointCount = computed(() => pointDefinitions.value.filter((item) => Number(item.billable) === 1
@@ -679,6 +687,18 @@ function nodeChildren(node: TreeNode) {
 function nodeKey(node: TreeNode) {
   return `${node.nodeType}-${node.id}`
 }
+function openTopologyNode(nodeType: 'GATEWAY' | 'DEVICE', id: unknown) {
+  const find = (nodes: TreeNode[]): TreeNode | undefined => {
+    for (const node of nodes) {
+      if (node.nodeType === nodeType && String(node.id) === String(id)) return node
+      const nested = find(nodeChildren(node))
+      if (nested) return nested
+    }
+    return undefined
+  }
+  const node = find(tree.value)
+  if (node) void selectNode(node)
+}
 function nodeTag(node: TreeNode) {
   return node.nodeType === 'GATEWAY' ? '网关' : node.nodeType === 'DEVICE' ? '设备' : node.nodeType === 'SPACE' ? '空间' : node.nodeType === 'GROUP' ? '分组' : '组织'
 }
@@ -696,12 +716,22 @@ function filterTreeNodes(nodes: RecordRow[], keyword: string): RecordRow[] {
 const wizardPublishedCatalogTree = computed(() => filterTreeNodes(publishedCatalogTree.value, wizardModelKeyword.value) as RecordRow[])
 const wizardOrgTree = computed(() => filterTreeNodes(organizationGatewayTree.value, wizardOrgKeyword.value))
 function nodeLabel(node: TreeNode) {
-  if (node.nodeType === 'GATEWAY') return `${node.gateway_name || '未命名网关'} · ${node.gateway_sn || node.id} · ${statusText(node.online_status ?? node.status)}`
-  if (node.nodeType === 'DEVICE') return `${node.device_name || '未命名设备'} · ${node.device_sn || node.id} · ${statusText(node.online_status ?? node.status)}`
+  if (node.nodeType === 'GATEWAY') return `${node.gateway_name || '未命名网关'} · ${node.gateway_sn || node.id}`
+  if (node.nodeType === 'DEVICE') return `${node.device_name || '未命名设备'} · ${node.device_sn || node.id}`
   if (node.nodeType === 'SPACE') return `${node.space_name || '未命名空间'}${node.space_code ? ` · ${node.space_code}` : ''}`
   if (node.nodeType === 'GROUP') return String(node.group_name || '未分组')
+  return String(node.org_name || '未命名组织')
+}
+function nodeTypeLabel(node: TreeNode) {
+  if (node.nodeType === 'GATEWAY') return '网关'
+  if (node.nodeType === 'DEVICE') return '设备'
+  if (node.nodeType === 'SPACE') return '空间'
+  if (node.nodeType === 'GROUP') return '分组'
   const type = orgTypeText(node.org_type)
-  return `${node.org_name || '未命名组织'}${type !== '—' ? ` · ${type}` : ''}`
+  return type === '—' ? '园区' : type
+}
+function treeStatusClass(node: TreeNode) {
+  return Number(node.online_status ?? node.status) === 1 ? 'online' : 'offline'
 }
 function nodeResource(node: TreeNode) {
   return node.nodeType === 'GATEWAY' ? 'gateways' : node.nodeType === 'DEVICE' ? 'devices' : 'orgs'
@@ -826,15 +856,34 @@ function formatMetricNumber(value: unknown, digits = 2) {
     ? number.toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits })
     : String(value)
 }
+function formatNormalNumber(value: unknown) {
+  const number = Number(value)
+  return Number.isFinite(number)
+    ? number.toLocaleString('zh-CN', { maximumFractionDigits: 6 })
+    : String(value)
+}
 function displayValue(value: unknown) {
   if (isMissingValue(value)) return '--'
   if (typeof value === 'number' || (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value)))) {
-    return formatMetricNumber(value)
+    return formatNormalNumber(value)
   }
   return value
 }
-function displayMetricValue(value: unknown) {
+function displayRealtimeMetricValue(value: unknown) {
   return isMissingValue(value) ? '--' : formatMetricNumber(value)
+}
+function displayAttributeValue(item: RecordRow) {
+  const rawValue = String(displayValue(item.attribute_value ?? item.template_value ?? item.default_value))
+  const unit = String(item.unit || '').trim()
+  if (rawValue === '--') return rawValue
+  const value = rawValue.replace(/(hz|bps|mm|v|a)\1$/i, '$1')
+  if (!unit) return value
+  const normalizedValue = value.replace(/\s+/g, '').toLowerCase()
+  const normalizedUnit = unit.replace(/\s+/g, '').toLowerCase()
+  return normalizedValue.endsWith(normalizedUnit) ? value : `${value} ${unit}`
+}
+function displayMetricValue(value: unknown) {
+  return isMissingValue(value) ? '--' : formatNormalNumber(value)
 }
 function pointDisplayName(code: unknown) {
   const normalized = normalizePointCode(code)
@@ -909,7 +958,7 @@ function archiveFieldValue(key: string, value: unknown) {
   if (key === 'online_status' || key === 'status') return statusText(value)
   if (key === 'org_type') return orgTypeText(value)
   if (['enabled', 'deleted', 'billable', 'stat_enabled', 'required'].includes(key)) return yesNoText(value)
-  if (typeof value === 'number' || (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value)))) return formatMetricNumber(value)
+  if (typeof value === 'number' || (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value)))) return formatNormalNumber(value)
   if (typeof value === 'object') return JSON.stringify(value)
   return String(value)
 }
@@ -1311,7 +1360,7 @@ async function duplicateSelection() {
   }
 }
 function deleteSelected() {
-  if (!selectedNode.value || !selectedCanMutate.value) return
+  if (!selectedNode.value || !selectedCanDelete.value) return
   deletingNodeRef.value = selectedNode.value
   deleteDialog.value = true
 }
@@ -2145,8 +2194,15 @@ onBeforeUnmount(() => {
                 <ChevronDown v-if="expandedKeys.has(nodeKey(entry.node))" :size="15" />
                 <ChevronRight v-else :size="15" />
               </span>
-              <span class="archive-tree-type" :class="String(entry.node.nodeType).toLowerCase()"><Building2 v-if="entry.node.nodeType === 'ORG'" :size="15" /><RadioTower v-else-if="entry.node.nodeType === 'GATEWAY'" :size="15" /><Cpu v-else :size="15" /></span>
-              <span>{{ nodeLabel(entry.node) }}</span>
+              <span class="archive-tree-type" :class="String(entry.node.nodeType).toLowerCase()">{{ nodeTypeLabel(entry.node) }}</span>
+              <span class="archive-tree-label">{{ nodeLabel(entry.node) }}</span>
+              <span
+                v-if="entry.node.nodeType === 'GATEWAY' || entry.node.nodeType === 'DEVICE'"
+                class="archive-tree-status"
+                :class="treeStatusClass(entry.node)"
+                :title="statusText(entry.node.online_status ?? entry.node.status)"
+                :aria-label="statusText(entry.node.online_status ?? entry.node.status)"
+              ></span>
             </button>
           </div>
         </aside>
@@ -2159,7 +2215,7 @@ onBeforeUnmount(() => {
               <button v-if="selectedIsOrg" class="quiet add-action" @click="openGatewayForSelectedOrg">+添加网关</button>
               <button class="icon-btn" :disabled="!selectedCanCopy" title="复制" aria-label="复制" @click="duplicateSelection"><Copy :size="16" /></button>
               <button class="icon-btn" :disabled="!selectedCanMutate" title="编辑" aria-label="编辑" @click="editSelected"><Pencil :size="16" /></button>
-              <button class="icon-btn danger-text" :disabled="!selectedCanMutate" title="删除" aria-label="删除" @click="deleteSelected"><Trash2 :size="16" /></button>
+              <button class="icon-btn danger-text" :disabled="!selectedCanDelete" title="删除" aria-label="删除" @click="deleteSelected"><Trash2 :size="16" /></button>
               <button class="icon-btn" title="刷新" aria-label="刷新" @click="refreshSelected"><RefreshCw :size="16" /></button>
             </div>
             <div class="archive-toolbar-meta">
@@ -2171,19 +2227,26 @@ onBeforeUnmount(() => {
 
           <template v-else>
           <div v-if="selectedIsDevice || selectedIsOrg" class="archive-tabs">
-            <button :class="{ active: activeArchiveTab === 'device' }" @click="activeArchiveTab = 'device'">基础档案</button>
-             <button :class="{ active: activeArchiveTab === 'runtime' }" @click="activeArchiveTab = 'runtime'">实时运行数据</button>
-             <button v-if="selectedIsDevice" :class="{ active: activeArchiveTab === 'efficiency' }" @click="activeArchiveTab = 'efficiency'">能效分析</button>
+            <button :class="{ active: activeArchiveTab === 'device' }" @click="activeArchiveTab = 'device'">{{ selectedIsOrg ? '园区概览' : '基础档案' }}</button>
+            <button v-if="!selectedIsOrg" :class="{ active: activeArchiveTab === 'runtime' }" @click="activeArchiveTab = 'runtime'">实时运行数据</button>
+            <button :class="{ active: activeArchiveTab === 'efficiency' }" @click="activeArchiveTab = 'efficiency'">{{ selectedIsOrg ? '园区能效' : '能效分析' }}</button>
             <button :class="{ active: activeArchiveTab === 'history' }" @click="activeArchiveTab = 'history'">计量历史</button>
             <button :class="{ active: activeArchiveTab === 'alarm' }" @click="activeArchiveTab = 'alarm'">告警与工单</button>
             <button :class="{ active: activeArchiveTab === 'inspection' }" @click="activeArchiveTab = 'inspection'">运维记录</button>
           </div>
+          <div v-else-if="selectedIsGateway" class="archive-tabs">
+            <button :class="{ active: activeArchiveTab === 'device' }" @click="activeArchiveTab = 'device'">网关概览</button>
+            <button :class="{ active: activeArchiveTab === 'runtime' }" @click="activeArchiveTab = 'runtime'">采集链路</button>
+            <button :class="{ active: activeArchiveTab === 'gateway-devices' }" @click="activeArchiveTab = 'gateway-devices'">设备列表</button>
+            <button :class="{ active: activeArchiveTab === 'inspection' }" @click="activeArchiveTab = 'inspection'">指令与回执</button>
+            <button :class="{ active: activeArchiveTab === 'alarm' }" @click="activeArchiveTab = 'alarm'">告警与工单</button>
+          </div>
           <div v-else class="archive-tabs archive-tabs-static">
-            <button class="active">{{ selectedIsGateway ? '网关概览' : selectedIsSpace ? '空间概览' : selectedIsGroup ? '状态分组' : '组织概览' }}</button>
+            <button class="active">{{ selectedIsSpace ? '空间概览' : selectedIsGroup ? '状态分组' : '组织概览' }}</button>
           </div>
 
-           <div v-if="(!selectedIsDevice && !selectedIsOrg) || ['device', 'inspection', 'runtime', 'efficiency'].includes(activeArchiveTab)" class="archive-runtime-grid" :class="{ 'archive-runtime-grid--efficiency': activeArchiveTab === 'efficiency' }">
-            <article v-if="activeArchiveTab !== 'efficiency'" class="archive-info-card">
+           <div v-if="(!selectedIsDevice && !selectedIsOrg && !selectedIsGateway) || ['device', 'inspection', 'runtime', 'efficiency', 'gateway-devices'].includes(activeArchiveTab)" class="archive-runtime-grid" :class="{ 'archive-runtime-grid--efficiency': activeArchiveTab === 'efficiency', 'archive-runtime-grid--device-base': selectedIsDevice && activeArchiveTab === 'device', 'archive-runtime-grid--gateway': selectedIsGateway, 'archive-runtime-grid--org-overview': selectedIsOrg && activeArchiveTab === 'device', 'archive-runtime-grid--single': ['inspection', 'runtime'].includes(activeArchiveTab) }">
+            <article v-if="activeArchiveTab !== 'efficiency' && !['inspection', 'runtime'].includes(activeArchiveTab)" class="archive-info-card">
               <div class="archive-section-title">
                 <i></i>
                 <h3>基础信息</h3>
@@ -2200,14 +2263,80 @@ onBeforeUnmount(() => {
                     <dd v-else>{{ displayValue(item[1]) }}</dd>
                   </template>
                 </dl>
+                <section v-if="selectedIsOrg" class="archive-org-runtime-overview">
+                  <div class="archive-subsection-title">
+                    <i></i>
+                    <h4>运行概览</h4>
+                    <small>园区运行与租赁范围</small>
+                  </div>
+                  <dl class="archive-org-runtime-fields">
+                    <dt>空间总数</dt>
+                    <dd>
+                      <span v-if="orgSpaces.length" class="archive-inline-values">
+                        <b v-for="space in orgSpaces" :key="String(space.id)">{{ space.space_name || space.space_code }}</b>
+                      </span>
+                      <span v-else>暂无空间档案</span>
+                    </dd>
+                    <dt>在租租户</dt>
+                    <dd>
+                      <span v-if="orgActiveTenants.length" class="archive-inline-values">
+                        <b v-for="tenant in orgActiveTenants" :key="String(tenant.tenant_id)">{{ tenant.tenant_name || tenant.contact_name }}</b>
+                      </span>
+                      <span v-else>暂无在租租户</span>
+                    </dd>
+                    <dt>生效合同</dt>
+                    <dd>
+                      <span v-if="orgActiveContracts.length" class="archive-inline-values">
+                        <b v-for="contract in orgActiveContracts" :key="String(contract.contract_id)">
+                          {{ contract.contract_name || contract.contract_code || `合同 ${contract.contract_id}` }}
+                        </b>
+                      </span>
+                      <span v-else>暂无生效合同</span>
+                    </dd>
+                    <dt>接入网关</dt>
+                    <dd>
+                      <span v-if="orgGateways.length" class="archive-inline-values">
+                        <b v-for="gateway in orgGateways" :key="String(gateway.id)">
+                          <i class="archive-status-dot" :class="statusMeta(gateway.online_status).class"></i>
+                          {{ gateway.gateway_name || gateway.gateway_sn || `网关 ${gateway.id}` }}
+                        </b>
+                      </span>
+                      <span v-else>暂无接入网关</span>
+                    </dd>
+                    <dt>接入设备</dt>
+                    <dd>
+                      <span v-if="orgDevices.length" class="archive-inline-values">
+                        <b v-for="device in orgDevices" :key="String(device.id)">
+                          <i class="archive-status-dot" :class="statusMeta(device.online_status).class"></i>
+                          {{ device.device_name || device.device_sn || `设备 ${device.id}` }}
+                        </b>
+                      </span>
+                      <span v-else>暂无接入设备</span>
+                    </dd>
+                  </dl>
+                </section>
+                <section v-if="selectedIsDevice" class="archive-product-attributes">
+                  <div class="archive-subsection-title">
+                    <i></i>
+                    <h4>产品属性</h4>
+                    <small>设备绑定型号的静态属性</small>
+                  </div>
+                  <div v-if="filteredModelAttributes.length" class="archive-product-attribute-grid">
+                    <div v-for="item in filteredModelAttributes" :key="String(item.attribute_id || item.attribute_code || item.attribute_name)">
+                      <span>{{ item.attribute_name || item.attribute_code || '未命名属性' }}</span>
+                      <b>{{ displayAttributeValue(item) }}</b>
+                    </div>
+                  </div>
+                  <p v-else class="archive-no-data archive-product-attributes-empty">暂无绑定产品属性。</p>
+                </section>
               </div>
             </article>
 
-            <article class="archive-realtime-card">
+            <article v-if="!(selectedIsDevice && activeArchiveTab === 'device')" class="archive-realtime-card">
               <template v-if="activeArchiveTab === 'device'">
                 <div class="archive-section-title archive-realtime-title">
                   <i></i>
-                  <h3>{{ selectedIsDevice ? '实时数据' : '运行概览' }}</h3>
+                  <h3>{{ selectedIsDevice ? '实时数据' : selectedIsOrg ? '网络拓扑' : '运行概览' }}</h3>
                   <div v-if="selectedIsDevice" class="archive-chart-actions">
                     <button class="quiet" type="button" @click="metricTemplateDialog = true">配置测点</button>
                   </div>
@@ -2229,13 +2358,34 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="archive-card-scroll">
                   <template v-if="!selectedIsDevice">
-                    <div class="archive-overview-grid">
+                    <div v-if="!selectedIsOrg" class="archive-overview-grid">
                       <article v-for="item in overviewCards" :key="String(item[0])" class="archive-overview-card">
                         <span>{{ item[0] }}</span>
                         <b>{{ displayValue(item[1]) }}</b>
                       </article>
                     </div>
-                    <div class="archive-chart-shell">
+                    <div v-if="selectedIsOrg" class="archive-asset-topology">
+                      <div v-if="!orgAssetTopology.length" class="archive-no-data">暂无网关与设备档案。</div>
+                      <section v-for="gateway in orgAssetTopology" v-else :key="String(gateway.id)" class="archive-topology-branch">
+                        <button class="archive-topology-gateway" type="button" :disabled="Boolean(gateway.virtual)" @click="openTopologyNode('GATEWAY', gateway.id)">
+                          <span class="archive-topology-gateway-icon"><RadioTower :size="24" /></span>
+                          <span><b>{{ gateway.gateway_name || gateway.gateway_sn }}</b><small>{{ gateway.gateway_sn || '尚未绑定网关' }}</small></span>
+                          <i class="archive-status-dot" :class="Number(gateway.online_status) === 1 ? 'online' : 'offline'" :title="statusText(gateway.online_status)"></i>
+                        </button>
+                        <div class="archive-topology-connector"></div>
+                        <div v-if="Array.isArray(gateway.devices) && gateway.devices.length" class="archive-topology-devices">
+                          <div v-for="device in gateway.devices" :key="String(device.id)" class="archive-topology-device-wrap">
+                            <button class="archive-topology-device" type="button" @click="openTopologyNode('DEVICE', device.id)">
+                              <AppImage class="archive-topology-device-image" :src="device.model_image_url || device.image_object_key" :alt="String(device.device_name || device.device_sn || '设备图片')" empty-text="暂无图片" />
+                              <span><b>{{ device.device_name || device.device_sn }}</b><small>{{ device.type_name || device.device_sn || '能源设备' }}</small></span>
+                              <i class="archive-status-dot" :class="Number(device.online_status) === 1 ? 'online' : 'offline'" :title="statusText(device.online_status)"></i>
+                            </button>
+                          </div>
+                        </div>
+                        <div v-else class="archive-topology-empty">该网关暂未绑定设备</div>
+                      </section>
+                    </div>
+                    <div v-else class="archive-chart-shell">
                       <div v-if="hasDeviceRealtimeChart" ref="overviewRealtimeChartEl" class="archive-trend-chart"></div>
                       <div v-if="!hasDeviceRealtimeChart" class="archive-no-data">暂无能耗趋势数据。</div>
                     </div>
@@ -2254,8 +2404,8 @@ onBeforeUnmount(() => {
               <template v-else-if="activeArchiveTab === 'inspection'">
                 <div class="archive-section-title">
                   <i></i>
-                  <h3>运维记录</h3>
-                  <small>工单、指令与操作留痕</small>
+                  <h3>{{ selectedIsGateway ? '指令与回执' : '运维记录' }}</h3>
+                  <small>{{ selectedIsGateway ? '网关下发指令与执行结果' : '工单、指令与操作留痕' }}</small>
                 </div>
                 <div class="archive-record-toolbar">
                   <label class="archive-search-box archive-record-search">
@@ -2280,29 +2430,58 @@ onBeforeUnmount(() => {
               </template>
 
               <template v-else-if="activeArchiveTab === 'efficiency'">
-                <div class="archive-section-title archive-realtime-title"><i></i><h3>设备能效分析</h3><small>当前设备图表</small></div>
+                <div class="archive-section-title archive-realtime-title"><i></i><h3>{{ selectedIsOrg ? '园区能效分析' : '设备能效分析' }}</h3><small>{{ selectedIsOrg ? '园区范围真实计量与能效图表' : '当前设备图表' }}</small></div>
                 <div class="device-efficiency-subtabs">
                   <button :class="{ active: deviceEfficiencyTab === 'three-phase-monitor' }" @click="deviceEfficiencyTab = 'three-phase-monitor'">三相监测</button>
                   <button :class="{ active: deviceEfficiencyTab === 'power-efficiency-analysis' }" @click="deviceEfficiencyTab = 'power-efficiency-analysis'">功率分析</button>
                   <button :class="{ active: deviceEfficiencyTab === 'energy-consume-statistics' }" @click="deviceEfficiencyTab = 'energy-consume-statistics'">能耗统计</button>
                 </div>
                 <div class="archive-card-scroll device-efficiency-workbench">
-                  <PowerEfficiencyWorkbench :page="deviceEfficiencyTab" :initial-device-id="String(detailDevice.id || selectedNode?.id || '')" :show-device-filter="false" :show-page-switcher="false" scope-mode="device" />
+                  <PowerEfficiencyWorkbench compact :page="deviceEfficiencyTab" :initial-device-id="selectedIsDevice ? String(detailDevice.id || selectedNode?.id || '') : ''" :initial-org-id="selectedIsOrg ? String(selectedNode?.id || '') : ''" :show-device-filter="selectedIsOrg" :show-page-switcher="false" :scope-mode="selectedIsOrg ? 'global' : 'device'" />
+                </div>
+              </template>
+
+              <template v-else-if="activeArchiveTab === 'gateway-devices'">
+                <div class="archive-section-title"><i></i><h3>接入设备</h3><small>当前网关绑定的设备与采集参数</small></div>
+                <div class="archive-card-scroll">
+                  <div v-if="!Array.isArray(profile.devices) || !profile.devices.length" class="archive-no-data">暂无绑定设备。</div>
+                  <div v-else class="archive-gateway-device-list">
+                    <div v-for="row in profile.devices" :key="String(row.device_id)" class="archive-gateway-device-row">
+                      <div><b>{{ row.device_name || row.device_sn }}</b><small>{{ row.device_sn }} · {{ row.type_name || '未配置类型' }}</small></div>
+                      <span><i class="archive-status-dot" :class="Number(row.online_status) === 1 ? 'online' : 'offline'"></i>{{ Number(row.online_status) === 1 ? '在线' : '离线' }}</span>
+                      <em>{{ row.protocol_addr || '—' }}</em><em>{{ row.collect_interval_seconds || '—' }} 秒</em>
+                    </div>
+                  </div>
                 </div>
               </template>
 
               <template v-else-if="activeArchiveTab === 'runtime'">
                 <div class="archive-section-title">
                   <i></i>
-                  <h3>实时运行数据</h3>
-                  <small>测点卡片</small>
+                  <h3>{{ selectedIsGateway ? '采集链路' : '实时运行数据' }}</h3>
+                  <small>{{ selectedIsGateway ? '网关上报与设备实时快照' : '测点卡片' }}</small>
                 </div>
                 <div class="archive-card-scroll">
-                  <div v-if="!runtimeCards.length" class="archive-no-data">暂无测点定义。</div>
+                  <template v-if="selectedIsGateway || selectedIsOrg">
+                    <div class="archive-overview-grid archive-chain-overview">
+                      <article class="archive-overview-card"><span>{{ selectedIsGateway ? '网关状态' : '园区在线网关' }}</span><b>{{ selectedIsGateway ? statusText(selectedGatewayProfile.online_status) : displayValue(profile.onlineGatewayCount) }}</b><small>{{ selectedIsGateway ? `最后心跳 ${selectedGatewayProfile.last_online_time || '暂无'}` : '实时档案统计' }}</small></article>
+                      <article class="archive-overview-card"><span>{{ selectedIsGateway ? '采集设备' : '实时设备快照' }}</span><b>{{ selectedIsGateway ? displayValue(profile.deviceCount) : displayValue(overviewRealtimeRows.length) }}</b><small>{{ selectedIsGateway ? `${displayValue(profile.onlineDeviceCount)} 台在线` : '最近上报设备数' }}</small></article>
+                      <article class="archive-overview-card"><span>实时快照</span><b>{{ displayValue(overviewRealtimeRows.length) }}</b><small>平台最近一次接收数据</small></article>
+                    </div>
+                    <div v-if="!overviewRealtimeRows.length" class="archive-no-data">暂无设备实时上报快照。</div>
+                    <div v-else class="archive-overview-grid">
+                      <article v-for="row in overviewRealtimeRows" :key="row.name" class="archive-overview-card">
+                        <span>{{ row.name }}</span>
+                        <b>{{ displayValue(row.value) }}</b>
+                        <small>实时点位合计</small>
+                      </article>
+                    </div>
+                  </template>
+                  <div v-else-if="!runtimeCards.length" class="archive-no-data">暂无测点定义。</div>
                   <div v-else class="archive-point-grid">
                     <article v-for="row in runtimeCards" :key="row.code" class="archive-point-card">
                       <b>{{ row.name }}</b>
-                      <strong>{{ displayMetricValue(row.value) }}</strong>
+                      <strong>{{ displayRealtimeMetricValue(row.value) }}</strong>
                       <small>{{ row.unit || '—' }}</small>
                     </article>
                   </div>
@@ -2311,7 +2490,7 @@ onBeforeUnmount(() => {
             </article>
           </div>
 
-          <div v-else-if="(selectedIsDevice || selectedIsOrg) && ['history', 'alarm'].includes(activeArchiveTab)" class="archive-history-panel archive-device-data-panel">
+          <div v-else-if="(selectedIsDevice || selectedIsOrg || selectedIsGateway) && ['history', 'alarm'].includes(activeArchiveTab)" class="archive-history-panel archive-device-data-panel">
             <div class="archive-section-title"><i></i><h3>{{ activeArchiveTab === 'history' ? '计量历史' : '告警与工单' }}</h3><small>{{ activeArchiveTab === 'history' ? '按采集批次聚合的真实历史数据' : '告警事件与处置上下文' }}</small></div>
             <div class="archive-query-row history-toolbar-row">
               <template v-if="activeArchiveTab === 'history'">
@@ -2323,7 +2502,7 @@ onBeforeUnmount(() => {
                 <button v-if="historyGranularity !== 'total'" class="quiet archive-period-arrow" type="button" title="下一周期" @click="shiftHistoryPeriod(1)">›</button>
                 <button class="quiet history-view-toggle" type="button" @click="toggleDataView">{{ dataView === 'chart' ? '历史表格' : '历史图表' }}</button>
               </template>
-              <button class="icon-btn" title="刷新" aria-label="刷新" @click="activeArchiveTab === 'history' ? loadMetricView() : refreshSelected()"><RefreshCw :size="16" /></button>
+              <button v-if="activeArchiveTab === 'history'" class="icon-btn" title="刷新" aria-label="刷新" @click="() => { void loadMetricView() }"><RefreshCw :size="16" /></button>
             </div>
 
             <div v-if="activeArchiveTab === 'history'" class="archive-device-data-body archive-device-data-body--full">
@@ -2332,52 +2511,58 @@ onBeforeUnmount(() => {
                 <div v-else-if="!historyHasData" class="archive-no-data archive-history-empty">当前周期没有可展示的数据。</div>
                 <div v-else class="archive-history-content">
                   <div v-if="dataView === 'chart'" ref="historyChartEl" class="archive-history-chart"></div>
-                  <div v-if="dataView === 'table'" class="archive-data-table archive-scroll-table">
-                    <div v-if="!historyDisplayRows.length" class="archive-no-data">暂无计量历史。</div>
-                    <template v-else>
-                      <div class="archive-wide-history-head">
-                        <span>采集时间</span>
-                        <span v-for="column in historyDisplayKeys" :key="column">{{ column }}</span>
-                      </div>
-                      <div v-for="row in historyDisplayRows" :key="row.time" class="archive-wide-history-row">
-                        <span>{{ row.time }}</span>
-                        <span v-for="column in historyDisplayKeys" :key="column">{{ displayMetricValue(row.values[column]) }}</span>
-                      </div>
-                      <div v-if="selectedIsDevice && rawHistoryTotal" class="table-pagination archive-table-pagination">
-                        <span>共 {{ rawHistoryTotal }} 批</span>
-                        <button class="quiet" :disabled="rawHistoryPage <= 1" @click="changeRawHistoryPage(rawHistoryPage - 1)">上一页</button>
-                        <button v-for="item in Array.from({ length: Math.min(5, rawHistoryPageCount) }, (_, index) => Math.max(1, Math.min(rawHistoryPageCount, rawHistoryPage - 2 + index)))" :key="item" class="page-number" :class="{ active: item === rawHistoryPage }" @click="changeRawHistoryPage(item)">{{ item }}</button>
-                        <button class="quiet" :disabled="rawHistoryPage >= rawHistoryPageCount" @click="changeRawHistoryPage(rawHistoryPage + 1)">下一页</button>
-                      </div>
-                    </template>
+                  <div v-if="dataView === 'table'" class="archive-data-table archive-history-table-shell">
+                    <div class="archive-history-table-scroll">
+                      <div v-if="!historyDisplayRows.length" class="archive-no-data">暂无计量历史。</div>
+                      <template v-else>
+                        <div class="archive-wide-history-head">
+                          <span>采集时间</span>
+                          <span v-for="column in historyDisplayKeys" :key="column">{{ column }}</span>
+                        </div>
+                        <div v-for="row in historyDisplayRows" :key="row.time" class="archive-wide-history-row">
+                          <span>{{ row.time }}</span>
+                          <span v-for="column in historyDisplayKeys" :key="column">{{ displayMetricValue(row.values[column]) }}</span>
+                        </div>
+                      </template>
+                    </div>
+                    <div v-if="selectedIsDevice && rawHistoryTotal" class="table-pagination archive-table-pagination">
+                      <span>共 {{ rawHistoryTotal }} 批</span>
+                      <button class="quiet" :disabled="rawHistoryPage <= 1" @click="changeRawHistoryPage(rawHistoryPage - 1)">上一页</button>
+                      <button v-for="item in Array.from({ length: Math.min(5, rawHistoryPageCount) }, (_, index) => Math.max(1, Math.min(rawHistoryPageCount, rawHistoryPage - 2 + index)))" :key="item" class="page-number" :class="{ active: item === rawHistoryPage }" @click="changeRawHistoryPage(item)">{{ item }}</button>
+                      <button class="quiet" :disabled="rawHistoryPage >= rawHistoryPageCount" @click="changeRawHistoryPage(rawHistoryPage + 1)">下一页</button>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div v-else class="archive-device-data-body archive-device-data-body--full">
-              <div class="archive-data-table archive-scroll-table archive-full-table">
+            <div v-else class="archive-device-data-body archive-device-data-body--full archive-alarm-workspace">
+              <div class="archive-alarm-summary">
+                <div><span>告警总数</span><b>{{ filteredRecentAlarms.length }}</b></div>
+                <div><span>未处理</span><b>{{ filteredRecentAlarms.filter((row) => String(row.deal_status ?? '0') === '0').length }}</b></div>
+                <div><span>已关联工单</span><b>{{ filteredRecentAlarms.filter((row) => row.work_order_no).length }}</b></div>
+              </div>
+              <div class="archive-data-table archive-alarm-table">
                 <div class="archive-table-headbar">
                   <label class="archive-search-box archive-table-search">
                     <Search :size="15" />
-                    <input v-model.trim="alarmSearchKeyword" placeholder="搜索表内内容">
+                    <input v-model.trim="alarmSearchKeyword" placeholder="搜索设备、告警类型、测点或工单">
                   </label>
-                  <details class="detail-filter-menu archive-column-filter-menu">
-                    <summary>列过滤 · {{ alarmVisibleColumns.length }} 项<ChevronDown :size="14" /></summary>
-                    <div>
-                      <label v-for="column in alarmColumnOptions" :key="column.key">
-                        <input type="checkbox" :checked="alarmColumnFilters.includes(column.key)" @change="setAlarmColumnFilter(column.key, ($event.target as HTMLInputElement).checked)">
-                        <span>{{ column.label }}</span>
-                      </label>
+                  <span class="archive-alarm-result-count">{{ filteredRecentAlarms.length }} 条记录</span>
+                </div>
+                <div class="archive-alarm-table-scroll">
+                  <div v-if="!pagedRecentAlarms.length" class="archive-no-data">暂无告警与处置记录。</div>
+                  <template v-else>
+                    <div class="archive-alarm-table-head"><span>告警对象</span><span>告警内容</span><span>级别</span><span>处置状态</span><span>关联工单</span><span>发生时间</span></div>
+                    <div v-for="row in pagedRecentAlarms" :key="String(row.id)" class="archive-alarm-table-row">
+                      <div class="archive-alarm-device"><b>{{ row.device_name || row.device_sn || selectedNodeTitle }}</b><small>{{ row.device_sn || row.point_code || '当前节点' }}</small></div>
+                      <div class="archive-alarm-content"><b>{{ alarmTypeText(row.alarm_type) }}</b><small>{{ row.point_code || '未指定测点' }}<template v-if="!isMissingValue(row.alarm_value)"> · 当前值 {{ displayMetricValue(row.alarm_value) }}</template></small></div>
+                      <span class="archive-alarm-badge" :class="`level-${String(row.alarm_level || 'info').toLowerCase()}`">{{ alarmLevelText(row.alarm_level) }}</span>
+                      <span class="archive-alarm-badge" :class="String(row.deal_status ?? '0') === '0' ? 'status-open' : 'status-closed'">{{ dealStatusText(row.deal_status) }}</span>
+                      <div class="archive-alarm-order"><b>{{ row.work_order_no || '未创建工单' }}</b><small>{{ row.work_order_no ? workOrderStatusText(row.work_order_status) : '等待处置' }}</small></div>
+                      <time>{{ row.alarm_time || '—' }}</time>
                     </div>
-                  </details>
-                </div>
-                <div v-if="!pagedRecentAlarms.length" class="archive-no-data">暂无告警与处置记录。</div>
-                <div v-else class="archive-full-table-head">
-                  <span v-for="column in alarmVisibleColumns" :key="column">{{ alarmColumnOptions.find((item) => item.key === column)?.label || fieldLabel(column) }}</span>
-                </div>
-                <div v-for="row in pagedRecentAlarms" :key="String(row.id)" class="archive-full-table-row">
-                  <span v-for="column in alarmVisibleColumns" :key="column">{{ column === 'alarm_type' ? alarmTypeText(row[column]) : column === 'alarm_level' ? alarmLevelText(row[column]) : column === 'deal_status' ? dealStatusText(row[column]) : column === 'work_order_status' ? workOrderStatusText(row[column]) : archiveFieldValue(column, row[column]) }}</span>
+                  </template>
                 </div>
                 <div v-if="filteredRecentAlarms.length" class="table-pagination archive-table-pagination">
                   <span>共 {{ filteredRecentAlarms.length }} 条</span>
@@ -2754,7 +2939,9 @@ onBeforeUnmount(() => {
     <AppConfirmDialog
       v-model:open="deleteDialog"
       :title="deletingNodeRef ? `删除${nodeTag(deletingNodeRef)}` : '确认删除'"
-      message="删除前会检查层级和业务引用；已有告警、指令、工单、账单或计量变更记录的设备不可删除。"
+      :message="deletingNodeRef?.nodeType === 'DEVICE'
+        ? '将永久删除该设备，并级联清理其告警、工单、指令、计费绑定、统计数据和其他关联记录。此操作不可恢复。'
+        : '删除前会检查层级和业务引用，请确认当前节点已不再使用。'"
       :loading="deleting"
       confirm-text="确认删除"
       @confirm="confirmDeleteNode"
