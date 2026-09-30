@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { BriefcaseBusiness, Building2, CheckCircle2, ImagePlus, KeyRound, Mail, Pencil, Phone, RefreshCw, ShieldCheck, Trash2, UserRound, UsersRound } from '@lucide/vue'
 import { changeMyPassword, clearMyAvatar, profileSummary, updateMyProfile, uploadMyAvatar } from '@/api/platform'
 import { currentUser } from '@/api/auth'
-import * as auth from '@/api/auth'
+import AppDialog from '@/components/app/AppDialog.vue'
 import { useSessionStore } from '@/stores/session'
 import type { RecordRow } from '@/types/domain'
 
