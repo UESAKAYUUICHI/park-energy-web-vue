@@ -42,9 +42,9 @@ async function onAvatarFile(event: Event) {
   const input = event.target as HTMLInputElement; const file = input.files?.[0]; if (!file) return
   if (!file.type.startsWith('image/') || file.size > 5 * 1024 * 1024) { error.value = '头像仅支持图片格式，且不能超过 5MB'; input.value = ''; return }
   avatarSaving.value = true
-  try { await uploadMyAvatar(file); session.applyPayload(await currentUser()); await load() } finally { avatarSaving.value = false; input.value = '' }
+  try { await uploadMyAvatar(file); session.applyPayload(await currentUser()); await load(); window.dispatchEvent(new CustomEvent('park-energy-avatar-updated', { detail: avatarUrl.value })) } finally { avatarSaving.value = false; input.value = '' }
 }
-async function removeAvatar() { avatarSaving.value = true; try { await clearMyAvatar(); session.applyPayload(await currentUser()); await load() } finally { avatarSaving.value = false } }
+async function removeAvatar() { avatarSaving.value = true; try { await clearMyAvatar(); session.applyPayload(await currentUser()); await load(); window.dispatchEvent(new CustomEvent('park-energy-avatar-updated', { detail: '' })) } finally { avatarSaving.value = false } }
 async function savePassword() {
   if (passwordForm.newPassword !== passwordForm.confirmPassword) { error.value = '两次输入的新密码不一致'; return }
   changingPassword.value = true

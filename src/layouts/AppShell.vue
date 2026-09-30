@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Compon
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { routeRecords } from '@/router/routes'
 import { useSessionStore } from '@/stores/session'
+import { profileSummary } from '@/api/platform'
 import { Archive, BadgeCheck, BarChart3, Bell, Blocks, Boxes, Building2, Cable, ChartNoAxesCombined, CircleDollarSign, ClipboardCheck, ClipboardList, Compass, Cpu, Crosshair, Factory, FileCheck2, FileClock, Gauge, KeyRound, Landmark, LayoutDashboard, Link2, ListChecks, LogOut, Menu, Network, PackageSearch, RadioReceiver, ReceiptText, Router, ScanSearch, Settings2, ShieldCheck, Siren, SlidersHorizontal, TableProperties, Tags, UserCircle, UsersRound, Workflow, Wrench } from '@lucide/vue'
 
 interface NavItem { name: string; path: string; title: string; permission?: string; icon: Component }
@@ -22,7 +23,18 @@ const openGroups = ref<string[]>(restoreOpenGroups())
 const sideNav = ref<HTMLElement | null>(null)
 const activeNavStyle = ref<Record<string, string>>({ opacity: '0' })
 const mobileNavOpen = ref(false)
+const avatarUrl = ref('')
+async function loadAvatar() {
+  try {
+    const summary = await profileSummary()
+    avatarUrl.value = String(summary.avatarUrl || '').trim()
+  } catch { avatarUrl.value = '' }
+}
+function onAvatarUpdated(event: Event) {
+  avatarUrl.value = String((event as CustomEvent<string>).detail || '').trim()
+}
 watch(openGroups, (value) => localStorage.setItem(navStateKey, JSON.stringify(value)), { deep: true })
+watch(() => route.path, (path) => { if (path === '/account/profile') void loadAvatar() })
 const isAdmin = computed(() => session.permissions.includes('*') || session.roles.includes('super_admin'))
 const record = (name: string) => routeRecords.find((item) => item.name === name)
 const navIcons: Record<string, Component> = {
@@ -150,8 +162,8 @@ watch(openGroups, () => {
   void syncActiveNavIndicator()
   window.setTimeout(() => { void syncActiveNavIndicator() }, 260)
 }, { deep: true, flush: 'post' })
-onMounted(() => { window.addEventListener('resize', syncActiveNavIndicator); ensureActiveGroupOpen(); void syncActiveNavIndicator() })
-onBeforeUnmount(() => window.removeEventListener('resize', syncActiveNavIndicator))
+onMounted(() => { window.addEventListener('resize', syncActiveNavIndicator); window.addEventListener('park-energy-avatar-updated', onAvatarUpdated); ensureActiveGroupOpen(); void syncActiveNavIndicator(); void loadAvatar() })
+onBeforeUnmount(() => { window.removeEventListener('resize', syncActiveNavIndicator); window.removeEventListener('park-energy-avatar-updated', onAvatarUpdated) })
 async function leave() {
   try {
     await session.signOut()
@@ -181,6 +193,6 @@ async function leave() {
       </nav>
       <div class="side-foot"><b>● 会话有效</b><span>ORG_SCOPE / 当前授权范围</span></div>
     </aside>
-    <div class="main-frame"><header class="topbar"><button class="mobile-menu-trigger" type="button" aria-label="打开菜单" @click="mobileNavOpen = true"><Menu :size="20" /></button><div class="crumb">智园能管 <b>/ {{ route.meta.title }}</b></div><div class="top-actions"><button class="user-pill" type="button" title="进入个人中心" @click="router.push('/account/profile')"><UserCircle :size="15" />{{ session.user?.nickname || session.user?.username || '当前用户' }}</button><button class="logout-icon" title="退出登录" aria-label="退出登录" @click="leave"><LogOut :size="16" /></button></div></header><main class="workspace" :class="{ 'workspace-fixed': fixedWorkspace }"><RouterView v-slot="{ Component, route: viewRoute }"><Transition name="page-motion" mode="out-in" appear><component :is="Component" :key="viewRoute.fullPath" /></Transition></RouterView></main><nav class="mobile-tabbar" aria-label="主要导航"><button v-for="entry in mobileTabs" :key="entry.name" type="button" :class="{ active: route.path === entry.path }" @click="navigateMobile(entry)"><component :is="entry.icon" :size="19" /><span>{{ entry.title }}</span></button><button type="button" :class="{ active: mobileNavOpen }" @click="mobileNavOpen = true"><Menu :size="19" /><span>更多</span></button></nav></div>
+    <div class="main-frame"><header class="topbar"><button class="mobile-menu-trigger" type="button" aria-label="打开菜单" @click="mobileNavOpen = true"><Menu :size="20" /></button><div class="crumb">智园能管 <b>/ {{ route.meta.title }}</b></div><div class="top-actions"><button class="user-pill" type="button" title="进入个人中心" @click="router.push('/account/profile')"><span class="topbar-avatar"><img v-if="avatarUrl" :src="avatarUrl" alt="头像"><UserCircle v-else :size="15" /></span>{{ session.user?.nickname || session.user?.username || '当前用户' }}</button><button class="logout-icon" title="退出登录" aria-label="退出登录" @click="leave"><LogOut :size="16" /></button></div></header><main class="workspace" :class="{ 'workspace-fixed': fixedWorkspace }"><RouterView v-slot="{ Component, route: viewRoute }"><Transition name="page-motion" mode="out-in" appear><component :is="Component" :key="viewRoute.fullPath" /></Transition></RouterView></main><nav class="mobile-tabbar" aria-label="主要导航"><button v-for="entry in mobileTabs" :key="entry.name" type="button" :class="{ active: route.path === entry.path }" @click="navigateMobile(entry)"><component :is="entry.icon" :size="19" /><span>{{ entry.title }}</span></button><button type="button" :class="{ active: mobileNavOpen }" @click="mobileNavOpen = true"><Menu :size="19" /><span>更多</span></button></nav></div>
   </div>
 </template>
