@@ -2,7 +2,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import AppDialog from '@/components/app/AppDialog.vue'
 import AppSelect from '@/components/app/AppSelect.vue'
-import { billingSpaceScopeDevices, contractAction, listResource, rootOrgs, saveContract } from '@/api/platform'
+import { billingSpaceScopeDevices, listResource, rootOrgs, saveContract } from '@/api/platform'
 import { clearRequestCache } from '@/api/http'
 import type { RecordRow } from '@/types/domain'
 import contractStamp from '@/assets/contract-stamp.png'
@@ -19,7 +19,7 @@ const filteredDevices=computed(()=>{const q=deviceKeyword.value.trim().toLowerCa
 let deviceRequest=0
 watch(()=>form.spaceIds,async(ids)=>{form.meterIds=[];const token=++deviceRequest;if(!ids.length){availableDevices.value=[];return}deviceLoading.value=true;try{const rows=await billingSpaceScopeDevices(ids);if(token===deviceRequest)availableDevices.value=rows||[]}catch(e){if(token===deviceRequest){availableDevices.value=[];error.value=e instanceof Error?e.message:'设备范围加载失败'}}finally{if(token===deviceRequest)deviceLoading.value=false}},{deep:true})
 async function load(){clearRequestCache('/archive/spaces');const r=await Promise.all([rootOrgs(),listResource('billing','tenants',{pageSize:500}),listResource('archive','spaces',{pageSize:500})]);orgs.value=r[0];tenants.value=r[1].records||[];spaces.value=r[2].records||[]}
-async function save(){if(!form.tenantId||!form.orgId||!form.contractNo||!form.contractName){error.value='请填写合同编号、名称、租户和园区';return}if(!form.spaceIds.length||!form.meterIds.length){error.value='正式合同必须至少选择一个空间和一台设备';return}saving.value=true;try{const x=await saveContract({contractNo:form.contractNo,contractName:form.contractName,tenantId:Number(form.tenantId),orgId:Number(form.orgId),startDate:form.startDate,endDate:form.endDate,settlementDay:1,spaces:form.spaceIds.map(id=>({spaceId:Number(id),startDate:form.startDate})),meters:form.meterIds.map(id=>({deviceId:Number(id),startDate:form.startDate,meterFactor:1}))});if(x?.id)await contractAction(x.id,'activate');emit('update:open',false);emit('saved')}catch(e){error.value=e instanceof Error?e.message:'合同保存失败'}finally{saving.value=false}}
+async function save(){if(!form.tenantId||!form.orgId||!form.contractNo||!form.contractName){error.value='请填写合同编号、名称、租户和园区';return}if(!form.spaceIds.length||!form.meterIds.length){error.value='正式合同必须至少选择一个空间和一台设备';return}saving.value=true;try{await saveContract({contractNo:form.contractNo,contractName:form.contractName,tenantId:Number(form.tenantId),orgId:Number(form.orgId),startDate:form.startDate,endDate:form.endDate,settlementDay:1,spaces:form.spaceIds.map(id=>({spaceId:Number(id),startDate:form.startDate})),meters:form.meterIds.map(id=>({deviceId:Number(id),startDate:form.startDate,meterFactor:1}))});emit('update:open',false);emit('saved')}catch(e){error.value=e instanceof Error?e.message:'合同保存失败'}finally{saving.value=false}}
 watch(() => props.open, (open) => { if (open) load() }, { immediate: true })
 </script>
 <template>

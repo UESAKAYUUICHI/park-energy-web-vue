@@ -4,6 +4,7 @@ import { AlertTriangle } from '@lucide/vue'
 defineProps<{
   open: boolean
   title?: string
+  eyebrow?: string
   message?: string
   loading?: boolean
   confirmText?: string
@@ -22,7 +23,7 @@ const emit = defineEmits<{ 'update:open': [value: boolean]; 'update:reason': [va
       <div class="confirm-body">
         <div class="confirm-icon"><AlertTriangle :size="22" /></div>
         <div class="confirm-copy">
-          <p class="eyebrow">DELETE CONFIRM</p>
+          <p class="eyebrow">{{ eyebrow || 'DELETE CONFIRM' }}</p>
           <h2>{{ title || '确认删除' }}</h2>
           <p>{{ message || '删除后数据将无法恢复，请确认是否继续。' }}</p>
           <textarea v-if="requireReason" :value="reason" :placeholder="reasonPlaceholder || '请输入操作原因'" rows="3" @input="emit('update:reason', ($event.target as HTMLTextAreaElement).value)" />

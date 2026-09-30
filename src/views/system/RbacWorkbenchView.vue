@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useAlertRef } from '@/composables/useAppAlert'
-import { ChevronDown, ChevronRight, RefreshCw, Search } from '@lucide/vue'
+import { ChevronDown, ChevronRight, RefreshCw, Save, Search } from '@lucide/vue'
 import { assignRolePermissions, assignUserRoles, rbac, rbacPage, rbacRelations } from '@/api/platform'
 import type { RecordRow } from '@/types/domain'
 
@@ -26,6 +26,8 @@ const expandedPermissionIds = ref<Set<string>>(new Set())
 const loading = ref(false)
 const error = useAlertRef()
 const saving = ref(false)
+const saveState = ref('')
+const permissionsDirty = ref(false)
 
 const autoSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const searchTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -79,6 +81,7 @@ function filterRows(items: RecordRow[], keyword: string, mapper: (row: RecordRow
 function resetChecks() {
   roleChecks.value = new Set()
   permissionChecks.value = new Set()
+  permissionsDirty.value = false
 }
 function selectUser(user: RecordRow) {
   selectedUserId.value = user.id
@@ -87,11 +90,13 @@ function selectUser(user: RecordRow) {
   roleChecks.value = roleId == null ? new Set() : new Set([String(roleId)])
   const role = roles.value.find((item) => sameId(item.id, roleId))
   permissionChecks.value = role ? new Set(rolePermissions.value.filter((item) => sameId(item.roleId ?? item.role_id, role.id)).map((item) => String(item.permissionId ?? item.permission_id))) : new Set()
+  permissionsDirty.value = false
 }
 function selectRole(role: RecordRow) {
   selectedRoleId.value = role.id
   roleChecks.value = new Set([String(role.id)])
   permissionChecks.value = new Set(rolePermissions.value.filter((item) => sameId(item.roleId ?? item.role_id, role.id)).map((item) => String(item.permissionId ?? item.permission_id)))
+  permissionsDirty.value = false
 }
 function hasPermissionChildren(item: RecordRow) {
   return Boolean(permissionChildren.value.get(String(item.id))?.length)
@@ -132,7 +137,7 @@ function toggleRole(id: unknown, checked: boolean) {
     roleChecks.value = new Set()
     permissionChecks.value = new Set()
   }
-  scheduleAutoSave('userRoles', saveUserRoles)
+  scheduleAutoSave('userRoles', () => saveUserRoles(selectedUserId.value, selectedRoleId.value))
 }
 function togglePermission(id: unknown, checked: boolean) {
   const next = new Set(permissionChecks.value)
@@ -146,11 +151,13 @@ function togglePermission(id: unknown, checked: boolean) {
     descendants.forEach((childId) => next.delete(childId))
   }
   permissionChecks.value = next
-  scheduleAutoSave('rolePermissions', saveRolePermissions)
+  permissionsDirty.value = true
+  saveState.value = '待保存'
 }
 function scheduleAutoSave(key: string, handler: () => Promise<void>) {
   const timer = autoSaveTimers.get(key)
   if (timer) clearTimeout(timer)
+  saveState.value = '等待保存'
   autoSaveTimers.set(key, setTimeout(async () => {
     autoSaveTimers.delete(key)
     await handler()
@@ -175,33 +182,44 @@ function runSearch(field: SearchField) {
     load()
   }
 }
-async function saveUserRoles() {
-  if (!selectedUserId.value) return
+async function saveUserRoles(userId: unknown, roleId: unknown) {
+  if (userId == null) return
   saving.value = true
+  saveState.value = '正在保存'
   error.value = ''
   try {
-    await assignUserRoles(selectedUserId.value, selectedRoleId.value == null ? [] : [Number(selectedRoleId.value)])
+    await assignUserRoles(userId, roleId == null ? [] : [Number(roleId)])
     await loadRelations()
-    if (selectedUser.value) selectUser(selectedUser.value)
+    if (sameId(selectedUserId.value, userId) && selectedUser.value) selectUser(selectedUser.value)
+    saveState.value = '已自动保存'
   } catch (e) {
     error.value = e instanceof Error ? e.message : '用户角色保存失败'
+    saveState.value = '保存失败'
   } finally {
     saving.value = false
   }
 }
-async function saveRolePermissions() {
-  if (!selectedRoleId.value) return
+async function saveRolePermissions(roleId: unknown, permissionIds: string[]) {
+  if (roleId == null) return
   saving.value = true
+  saveState.value = '正在保存'
   error.value = ''
   try {
-    await assignRolePermissions(selectedRoleId.value, [...permissionChecks.value].map(Number))
+    await assignRolePermissions(roleId, permissionIds.map(Number))
     await loadRelations()
-    if (selectedRole.value) selectRole(selectedRole.value)
+    if (sameId(selectedRoleId.value, roleId) && selectedRole.value) selectRole(selectedRole.value)
+    permissionsDirty.value = false
+    saveState.value = '已保存'
   } catch (e) {
     error.value = e instanceof Error ? e.message : '角色权限保存失败'
+    saveState.value = '保存失败'
   } finally {
     saving.value = false
   }
+}
+async function saveCurrentPermissions() {
+  if (selectedRoleId.value == null || !permissionsDirty.value || saving.value) return
+  await saveRolePermissions(selectedRoleId.value, [...permissionChecks.value])
 }
 async function loadRelations() {
   relations.value = await rbacRelations()
@@ -287,6 +305,7 @@ onBeforeUnmount(() => {
       <article class="panel rbac-column">
         <div class="panel-head">
           <div><h3>权限列表</h3><small>角色权限绑定</small></div>
+          <div class="permission-actions"><span class="save-indicator" :class="{ saving }">{{ saveState }}</span><button class="primary save-permissions" :disabled="saving || !selectedRoleId || !permissionsDirty" title="保存权限分配" @click="saveCurrentPermissions"><Save :size="14" />保存</button></div>
           <span class="tag blue">{{ permissionChecks.size }} 项已选</span>
         </div>
         <label class="rbac-search">
@@ -308,3 +327,7 @@ onBeforeUnmount(() => {
     </div>
   </section>
 </template>
+
+<style scoped>
+.permission-actions{display:flex;align-items:center;gap:8px;margin-left:auto}.save-indicator{color:#2c9569;font-size:10px;white-space:nowrap}.save-indicator.saving{color:#b6782d}.save-permissions{display:inline-flex;align-items:center;gap:5px;height:29px;padding:0 10px;font-size:11px}.save-permissions:disabled{opacity:.45;cursor:not-allowed}
+</style>

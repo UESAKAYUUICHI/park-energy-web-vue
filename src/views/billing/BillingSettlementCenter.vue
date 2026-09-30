@@ -2230,6 +2230,53 @@ watch(
             <small>已收 ¥{{ money(summary.paidAmount) }}</small>
           </article>
         </section>
+        <section class="overview-quick-workbench">
+          <article class="panel overview-context-card">
+            <div><span>当前账期</span><b>{{ summary.cycle || cycle }}</b><small>{{ summary.subjectCount || 0 }} 个结算对象 · {{ summary.issuedSubjects || 0 }} 个已发布</small></div>
+            <button class="quiet" @click="router.push('/billing/payments')">打开账单工作台</button>
+          </article>
+          <article class="panel overview-entry-card">
+            <span class="overview-entry-icon"><ClipboardCheck :size="17" /></span>
+            <div><b>合同与计价</b><small>{{ summary.blockedSubjects || 0 }} 个对象需要补齐结算条件</small></div>
+            <button class="quiet" @click="router.push('/billing/rules')">查看合同</button>
+          </article>
+          <article class="panel overview-entry-card">
+            <span class="overview-entry-icon"><RefreshCw :size="17" /></span>
+            <div><b>自动出账计划</b><small>失败任务和下一次执行时间在弹窗中查看</small></div>
+            <button class="quiet" @click="openScheduleList">查看计划</button>
+          </article>
+          <article class="panel overview-entry-card">
+            <span class="overview-entry-icon"><ReceiptText :size="17" /></span>
+            <div><b>收款与发票</b><small>待收 ¥{{ money(summary.outstandingAmount) }} · 对账差异 {{ summary.differenceCount || 0 }}</small></div>
+            <button class="quiet" @click="router.push('/billing/payments')">处理收款</button>
+          </article>
+        </section>
+        <section class="overview-focus-grid">
+          <article class="panel overview-focus-panel">
+            <header><div><b>当前待办</b><small>只显示需要人工确认的业务</small></div><button class="quiet" @click="router.push('/billing/payments')">进入工作台</button></header>
+            <div class="overview-focus-list">
+              <button v-for="item in todos.slice(0, 4)" :key="`${item.stage}-${item.title}`" class="overview-focus-row" @click="handleOverviewTodo(item)">
+                <span class="focus-status"></span><span><b>{{ item.title }}</b><small>{{ item.detail }}</small></span><strong>{{ todoActionText(item) }}</strong>
+              </button>
+              <p v-if="!todos.length" class="empty">当前没有待处理事项。</p>
+            </div>
+          </article>
+          <article class="panel overview-focus-panel">
+            <header><div><b>需要关注</b><small>优先检查未收款和链路异常对象</small></div><span class="focus-count">{{ overviewRisks.length }}</span></header>
+            <div class="overview-focus-list">
+              <div v-for="item in overviewRisks.slice(0, 4)" :key="String(item.accountId || item.id)" class="overview-focus-row static">
+                <span class="focus-status warning"></span><span><b>{{ item.subjectName || item.accountName || '未命名对象' }}</b><small>{{ item.orgName || '—' }} · {{ item.jobText || item.schemeText || item.admissionText || '需要核查' }}</small></span><strong>¥{{ money(item.outstandingAmount) }}</strong>
+              </div>
+              <p v-if="!overviewRisks.length" class="empty">当前没有需要重点关注的对象。</p>
+            </div>
+          </article>
+        </section>
+        <section class="overview-summary-strip">
+          <article class="panel"><span>本期应收</span><b>¥{{ money(summary.issuedAmount) }}</b><small>{{ summary.issuedSubjects || 0 }} 个对象</small></article>
+          <article class="panel"><span>已收金额</span><b>¥{{ money(summary.paidAmount) }}</b><small>回收率 {{ overviewPaidRate }}%</small></article>
+          <article class="panel"><span>待收余额</span><b :class="{ arrears: Number(summary.outstandingAmount || 0) > 0 }">¥{{ money(summary.outstandingAmount) }}</b><small>{{ summary.outstandingSubjects || 0 }} 个对象待处理</small></article>
+          <article class="panel"><span>最新动态</span><b>{{ overviewEvents[0]?.title || '暂无动态' }}</b><small>{{ overviewEvents[0]?.detail || '账期内暂无新的业务事件' }}</small></article>
+        </section>
         <section class="metric-grid overview-metric-grid">
           <article>
             <span>待完善对象</span><b>{{ summary.blockedSubjects || 0 }}</b
@@ -2300,9 +2347,6 @@ watch(
               ><strong><em>{{ item.stage }}</em><small>{{ todoActionText(item) }}</small></strong>
             </button>
             <p v-if="!todos.length" class="empty">暂无待办。</p>
-            <div class="overview-todo-flow">
-              处理顺序：结算规则补齐准入 → 配置计价方案 → 账单支付审核发布 → 结算档案关账归档
-            </div>
           </article>
           <article class="panel overview-risk-panel">
             <header><b>风险对象</b><small>优先处理未收款或链路阻断对象</small></header>
@@ -2351,6 +2395,7 @@ watch(
           <div class="toolbar-actions">
             <button class="quiet" @click="openAux('spaces')">
               空间管理</button
+            ><button class="quiet" @click="openAux('pricing')">计费规则库</button
             ><button class="primary" @click="openContract()">新增合同</button>
           </div>
         </section>
@@ -2437,7 +2482,6 @@ watch(
                   <button class="text-button" @click="show(r)">查看合同</button
                   ><button
                     v-if="
-                      Number(r.rule_count || 0) === 0 &&
                       !['TERMINATED', 'CLOSED'].includes(
                         String(r.status || r.contract_status),
                       )
@@ -2445,7 +2489,7 @@ watch(
                     class="text-button config-link"
                     @click="openContractPricing(r)"
                   >
-                    配置计价</button
+                    {{ Number(r.rule_count || 0) > 0 ? '查看/调整计价' : '配置计价' }}</button
                   ><button
                     v-if="
                       !['TERMINATED', 'CLOSED'].includes(
@@ -6056,6 +6100,12 @@ watch(
   color: #657682;
   font-size: 12px;
 }
+</style>
+<style scoped>
+/* 总览只负责定位待办，账单、对账和归档明细通过工作台或弹窗展开。 */
+.overview-quick-workbench{display:grid;grid-template-columns:minmax(270px,1.35fr) repeat(3,minmax(190px,1fr));gap:10px;margin-bottom:12px}.overview-context-card,.overview-entry-card{min-width:0;display:flex;align-items:center;gap:10px;padding:13px 14px}.overview-context-card{justify-content:space-between;background:linear-gradient(105deg,#f4f9fd,#fff)}.overview-context-card>div,.overview-entry-card>div{min-width:0;display:grid;gap:3px}.overview-context-card span,.overview-entry-card small{color:var(--muted);font-size:10px}.overview-context-card b,.overview-entry-card b{color:#25445f;font-size:13px}.overview-context-card small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.overview-entry-icon{display:grid;place-items:center;flex:none;width:30px;height:30px;border:1px solid #d5e4f0;border-radius:7px;background:#f2f8fd;color:var(--accent)}.overview-entry-card button{flex:none;margin-left:auto}.settlement-center:has(.business-overview-hero) .overview-metric-grid,.settlement-center:has(.business-overview-hero) .overview-process-grid,.settlement-center:has(.business-overview-hero) .overview-columns,.settlement-center:has(.business-overview-hero) .overview-bottom-grid{display:none}
+.overview-focus-grid{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(340px,.88fr);gap:10px;margin-bottom:10px}.overview-focus-panel{min-width:0;padding:14px 16px}.overview-focus-panel>header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}.overview-focus-panel>header>div{display:grid;gap:3px}.overview-focus-panel>header b{color:#294a67;font-size:13px}.overview-focus-panel>header small{color:var(--muted);font-size:10px}.overview-focus-panel>header button{flex:none}.focus-count{display:grid;place-items:center;min-width:24px;height:24px;border-radius:50%;background:#fff3dc;color:#a8640b;font-size:11px;font-weight:700}.overview-focus-list{display:grid}.overview-focus-row{width:100%;display:grid;grid-template-columns:7px minmax(0,1fr) auto;align-items:center;gap:9px;min-width:0;padding:9px 2px;border:0;border-bottom:1px solid #edf2f6;background:transparent;color:inherit;text-align:left}.overview-focus-row:last-child{border-bottom:0}.overview-focus-row:not(.static){cursor:pointer}.overview-focus-row:not(.static):hover{background:#f7fbfe}.overview-focus-row>span:nth-child(2){display:grid;min-width:0;gap:3px}.overview-focus-row b,.overview-focus-row small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.overview-focus-row b{color:#34516d;font-size:11px}.overview-focus-row small{color:var(--muted);font-size:10px}.overview-focus-row strong{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#42739b;font-size:10px;font-weight:600}.focus-status{width:7px;height:7px;border-radius:50%;background:#318dc1}.focus-status.warning{background:#e5a03c}.overview-summary-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:10px}.overview-summary-strip>.panel{display:grid;gap:4px;min-width:0;padding:12px 14px}.overview-summary-strip span,.overview-summary-strip small{color:var(--muted);font-size:10px}.overview-summary-strip b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#294a67;font-size:16px}.overview-summary-strip article:last-child b{font-size:12px}.overview-summary-strip small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:1100px){.overview-quick-workbench{grid-template-columns:repeat(2,minmax(0,1fr))}.overview-context-card{grid-column:1/-1}.overview-summary-strip{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:760px){.overview-focus-grid{grid-template-columns:1fr}}@media(max-width:680px){.overview-quick-workbench{grid-template-columns:1fr}.overview-context-card{grid-column:auto;align-items:flex-start;flex-direction:column}.overview-entry-card{align-items:flex-start}.overview-entry-card button{margin-left:auto}.overview-summary-strip{grid-template-columns:1fr}}
 </style>
 
 <style scoped>

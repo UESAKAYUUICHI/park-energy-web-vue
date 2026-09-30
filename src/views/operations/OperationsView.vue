@@ -25,6 +25,7 @@ import AppDialog from "@/components/app/AppDialog.vue";
 import AppLoadingState from "@/components/app/AppLoadingState.vue";
 import {
   createWorkOrder,
+  deleteInspectionPlan,
   executeInspection,
   generateInspectionTasks,
   inspectionAssignees,
@@ -607,6 +608,15 @@ async function savePlan() {
     error.value = e instanceof Error ? e.message : "保存巡检计划失败";
   }
 }
+async function deletePlan(row: RecordRow) {
+  if (!window.confirm(`确认删除巡检计划“${String(row.plan_name || row.plan_no || row.id)}”及其未关联工单的任务吗？`)) return;
+  try {
+    await deleteInspectionPlan(row.id);
+    await load();
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "删除巡检计划失败";
+  }
+}
 async function generate() {
   try {
     await generateInspectionTasks(taskDate.value);
@@ -1009,7 +1019,13 @@ onMounted(async () => {
                 @click="openPlan(row)"
               >
                 编辑计划
-              </button></template
+              </button><button
+                v-if="session.can('ops:inspection:edit')"
+                class="icon-btn danger-text"
+                title="删除计划"
+                aria-label="删除计划"
+                @click="deletePlan(row)"
+              ><Trash2 :size="15" /></button></template
             ></AppDataTable
           >
         </section>
@@ -1079,7 +1095,7 @@ onMounted(async () => {
       @update:open="detailMoreOpen = $event"
     >
       <dl class="detail-grid full-detail-grid">
-        <template v-for="item in workOrderFullDetails" :key="item[0]"
+        <template v-for="item in workOrderFullDetails" :key="String(item[0])"
           ><dt>{{ item[0] }}</dt>
           <dd>{{ item[1] }}</dd></template
         >

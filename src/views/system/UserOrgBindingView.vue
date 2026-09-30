@@ -91,7 +91,10 @@ async function load() {
     ])
     users.value = userPage.records
     orgTree.value = tree
-    if (users.value[0]) await selectUser(users.value[0])
+    const currentUserId = session.user?.id
+    const current = users.value.find((user) => String(user.id) === String(currentUserId) || String(user.username) === String(session.user?.username))
+    const target = current || users.value[0]
+    if (target) await selectUser(target)
   } catch (e) {
     error.value = e instanceof Error ? e.message : '用户组织绑定数据读取失败'
   } finally {

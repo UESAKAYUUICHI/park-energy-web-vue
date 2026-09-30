@@ -1101,7 +1101,7 @@ onMounted(() => {
         }
       "
       ><dl class="detail-grid compact-detail-grid">
-        <template v-for="item in essentialDetailItems" :key="item[0]"
+        <template v-for="item in essentialDetailItems" :key="String(item[0])"
           ><dt>{{ item[0] }}</dt>
           <dd>{{ item[1] }}</dd></template
         >
@@ -1213,7 +1213,7 @@ onMounted(() => {
       @update:open="eventMoreOpen = $event"
     >
       <dl class="detail-grid full-detail-grid">
-        <template v-for="item in detailItems" :key="item[0]">
+        <template v-for="item in detailItems" :key="String(item[0])">
           <dt>{{ item[0] }}</dt>
           <dd>{{ item[1] }}</dd>
         </template>

@@ -266,7 +266,7 @@ const selectedIsGateway = computed(() => selectedNode.value?.nodeType === 'GATEW
 const selectedIsOrg = computed(() => selectedNode.value?.nodeType === 'ORG')
 const selectedIsSpace = computed(() => selectedNode.value?.nodeType === 'SPACE')
 const selectedIsGroup = computed(() => selectedNode.value?.nodeType === 'GROUP')
-const selectedCanMutate = computed(() => ['ORG', 'GATEWAY'].includes(String(selectedNode.value?.nodeType)))
+const selectedCanMutate = computed(() => ['ORG', 'GATEWAY', 'DEVICE'].includes(String(selectedNode.value?.nodeType)))
 const selectedCanDelete = computed(() => ['ORG', 'GATEWAY', 'DEVICE'].includes(String(selectedNode.value?.nodeType)))
 const deviceGatewayFilterOptions = computed(() => {
   if (!deviceRootOrgIds.value.length) return [] as RecordRow[]
@@ -298,7 +298,7 @@ const filteredPointDrafts = computed(() => pointDrafts.value.filter((point) => {
 }))
 const selectedCanCopy = computed(() => ['ORG', 'GATEWAY'].includes(String(selectedNode.value?.nodeType)))
 const selectedNodeTitle = computed(() => selectedNode.value ? nodeLabel(selectedNode.value) : '请选择左侧节点')
-const createLabel = computed(() => selectedIsGateway.value ? '+新增网关' : '+新增组织')
+const createLabel = computed(() => selectedIsGateway.value ? '+新增设备' : '+新增组织')
 const showPrimaryCreate = computed(() => !selectedIsDevice.value && !selectedIsSpace.value && !selectedIsGroup.value)
 const orgTypeOptions = [
   { label: '园区', value: 1 },
@@ -1124,7 +1124,7 @@ function openGateway(orgId?: unknown, row?: RecordRow) {
   Object.assign(form, {
     gateway_sn: row?.gateway_sn || '',
     gateway_name: row?.gateway_name || '',
-    mqtt_secret: row?.mqtt_secret || 'secret',
+    mqtt_secret: editingId.value ? '' : (row?.mqtt_secret || 'secret'),
     org_id: orgId ?? row?.org_id ?? '',
     install_location: row?.install_location || '',
     ip_address: row?.ip_address || '',
@@ -1337,16 +1337,29 @@ function onlyPublishedModels(nodes: RecordRow[]): RecordRow[] {
 function openAddBySelection() {
   if (!selectedNode.value) return openOrg(0)
   if (selectedNode.value.nodeType === 'ORG') return openOrg(selectedNode.value.id)
-  if (selectedNode.value.nodeType === 'GATEWAY') return openGateway(selectedNode.value.org_id)
+  if (selectedNode.value.nodeType === 'GATEWAY') return openDevice(selectedNode.value)
 }
 function openGatewayForSelectedOrg() {
   if (!selectedNode.value || selectedNode.value.nodeType !== 'ORG') return
   openGateway(selectedNode.value.id)
 }
-function editSelected() {
-  if (!selectedNode.value || !selectedCanMutate.value) return
-  if (selectedNode.value.nodeType === 'ORG') openOrg(undefined, selectedNode.value)
-  else if (selectedNode.value.nodeType === 'GATEWAY') openGateway(undefined, selectedNode.value)
+async function editSelected() {
+  const node = selectedNode.value
+  if (!node || !selectedCanMutate.value) return
+  try {
+    if (node.nodeType === 'ORG') {
+      const profile = await orgArchiveProfile(node.id)
+      openOrg(undefined, (profile.org || profile) as RecordRow)
+    } else if (node.nodeType === 'GATEWAY') {
+      const profile = await gatewayArchiveProfile(node.id)
+      openGateway(undefined, (profile.gateway || profile) as RecordRow)
+    } else if (node.nodeType === 'DEVICE') {
+      const profile = await deviceProfile(node.id)
+      openDevice(undefined, (profile.device || profile) as RecordRow)
+    }
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : '读取档案详情失败'
+  }
 }
 async function duplicateSelection() {
   if (!selectedNode.value) return
@@ -1383,6 +1396,9 @@ async function saveForm() {
   try {
     const resource = formType.value === 'org' ? 'orgs' : formType.value === 'gateway' ? 'gateways' : 'devices'
     const payload = formPayload()
+    if (editingId.value && formType.value === 'gateway' && !String(payload.mqtt_secret || '').trim()) {
+      delete payload.mqtt_secret
+    }
     if (editingId.value && formType.value === 'device') {
       delete payload.device_type_id
       delete payload.model_version_id
@@ -2796,9 +2812,10 @@ onBeforeUnmount(() => {
         <div class="dialog-field full device-model-tree-field"><span>所属组织*</span><div class="device-model-tree archive-tree-list"><CatalogTreeNode v-for="node in dialogOrgTree" :key="String(node.key)" :node="node" :selected-key="selectedOrgTreeKey" @select="selectDialogOrg" /></div></div>
         <label class="dialog-field"><span>网关编号*</span><input v-model="form.gateway_sn" required></label>
         <label class="dialog-field"><span>网关名称*</span><input v-model="form.gateway_name" required></label>
-        <label class="dialog-field"><span>MQTT 密钥*</span><input v-model="form.mqtt_secret" required></label>
+        <label class="dialog-field"><span>MQTT 密钥{{ editingId ? '' : '*' }}</span><input v-model="form.mqtt_secret" :required="!editingId" :placeholder="editingId ? '留空表示不修改原密钥' : ''"></label>
         <label class="dialog-field"><span>IP 地址</span><input v-model="form.ip_address"></label>
         <label class="dialog-field"><span>安装位置</span><input v-model="form.install_location"></label>
+        <label class="dialog-field"><span>心跳周期（秒）</span><input v-model.number="form.heartbeat_interval" type="number" min="5" step="1"></label>
         <label class="dialog-field"><span>启用状态</span><AppSelect v-model="form.status"><option v-for="item in statusOptions" :key="String(item.value)" :value="item.value">{{ item.label }}</option></AppSelect></label>
       </div>
       <div v-else-if="formType === 'device' && editingId" class="dialog-fields">

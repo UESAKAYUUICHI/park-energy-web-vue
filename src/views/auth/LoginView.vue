@@ -23,7 +23,6 @@ const session = useSessionStore()
 const localTestLogin = computed(() => username.value.trim() === 'test' && password.value === 'test')
 
 function loginRoleLabel() {
-  const role = String(session.roles[0] || session.user?.roleName || session.user?.role_name || '').trim()
   const labels: Record<string, string> = {
     super_admin: '超级管理员',
     admin: '管理员',
@@ -31,7 +30,10 @@ function loginRoleLabel() {
     operator: '运营人员',
     viewer: '查看人员',
   }
-  return labels[role] || role || '平台用户'
+  const rawRole = session.roles[0] || session.user?.roleName || session.user?.role_name || ''
+  const role = String(rawRole).trim()
+  const normalizedRole = role.toLowerCase().replace(/\s+/g, '_')
+  return labels[normalizedRole] || labels[role] || role || '平台用户'
 }
 
 function randomCaptcha() {

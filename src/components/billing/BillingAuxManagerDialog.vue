@@ -10,6 +10,8 @@ import {
   billingSpaceScopeOptions,
   billingSpaceScopes,
   billingSpaceScopeDevices,
+  contractAction,
+  prepareContractAccount,
   tariffPlan,
   deleteTariffPlan,
   deviceTypePoints,
@@ -418,22 +420,29 @@ async function save() {
         return { scopeType, scopeNodeId: Number(scopeNodeId) };
       }));
     } else {
+      const contractData =
+        props.contract?.id && !props.contract.account && !props.contract.account_id
+          ? await prepareContractAccount(props.contract.id)
+          : props.contract;
       const account = Number(
         price.accountId ||
-          (
-            (props.contract as RecordRow | undefined)?.account as
-              RecordRow | undefined
-          )?.id ||
-          props.contract?.account_id ||
+          ((contractData as RecordRow | undefined)?.account as RecordRow | undefined)?.id ||
+          (contractData as RecordRow | undefined)?.account_id ||
           0,
       );
       if (
         !account ||
         !price.ruleName ||
         !configs.value.length ||
-        configs.value.some((c) => !c.deviceTypeId || !c.pointCodes.length)
+        configs.value.some((c) => !c.deviceTypeId || !c.pointCodes.length) ||
+        (price.priceMode !== "TIME_PERIOD" &&
+          (price.amount === "" || Number(price.amount) < 0))
       ) {
-        error.value = "请为每台合同设备选择至少一个测点";
+        error.value =
+          price.priceMode !== "TIME_PERIOD" &&
+          (price.amount === "" || Number(price.amount) < 0)
+            ? "请填写有效的单价或固定金额"
+            : "请为每台合同设备选择至少一个测点";
         return;
       }
       const grouped = configs.value.reduce(
@@ -463,9 +472,32 @@ async function save() {
         tariff_plan_id: price.tariffPlanId ? Number(price.tariffPlanId) : null,
         enabled: 1,
       };
-      if (editing.value?.id)
-        await updateResource("billing", "rules", editing.value.id, b);
-      else await createResource("billing", "rules", b);
+      const savedRule = editing.value?.id
+        ? await updateResource("billing", "rules", editing.value.id, b)
+        : await createResource("billing", "rules", b);
+      const ruleId = Number(savedRule?.id || editing.value?.id || 0);
+      if (ruleId && price.priceMode !== "TIME_PERIOD") {
+        const existing = await listResource("billing", "price-items", {
+          pageSize: 50,
+          rule_id: ruleId,
+        });
+        const item = {
+          rule_id: ruleId,
+          price_label: price.priceMode === "FIXED" ? "固定金额" : "标准单价",
+          tier_min: 0,
+          unit_price: Number(price.amount),
+          sort: 1,
+        };
+        const first = (existing.records || [])[0];
+        if (first?.id)
+          await updateResource("billing", "price-items", first.id, item);
+        else await createResource("billing", "price-items", item);
+      }
+      if (
+        props.contract?.id &&
+        String((contractData as RecordRow | undefined)?.status || props.contract.status || "").toUpperCase() === "DRAFT"
+      )
+        await contractAction(props.contract.id, "activate");
     }
     editorOpen.value = false;
     emit("update:open", false);
