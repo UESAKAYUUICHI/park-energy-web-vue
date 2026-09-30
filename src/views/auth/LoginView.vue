@@ -30,6 +30,9 @@ function loginRoleLabel() {
     operator: '运营人员',
     viewer: '查看人员',
   }
+  const roleDetail = session.roleDetails[0]
+  const roleName = String(roleDetail?.role_name || roleDetail?.roleName || '').trim()
+  if (roleName) return roleName
   const rawRole = session.roles[0] || session.user?.roleName || session.user?.role_name || ''
   const role = String(rawRole).trim()
   const normalizedRole = role.toLowerCase().replace(/\s+/g, '_')

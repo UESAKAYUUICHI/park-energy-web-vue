@@ -1344,7 +1344,7 @@ function openArchiveContextMenu(event: MouseEvent, node?: TreeNode) {
   if (node) void selectNode(node)
   const target = node || selectedNode.value
   const width = 196
-  const height = target ? 330 : 210
+  const height = contextMenuHeight(target)
   archiveContextMenu.value = {
     x: Math.min(event.clientX, Math.max(8, window.innerWidth - width - 8)),
     y: Math.min(event.clientY, Math.max(8, window.innerHeight - height - 8)),
@@ -1361,13 +1361,27 @@ function contextNodeIsGateway() { return archiveContextMenu.value?.node?.nodeTyp
 function contextNodeCanBind() { return contextNodeIsOrg() || contextNodeIsGateway() }
 function contextNodeCanCopy() { return ['ORG', 'GATEWAY'].includes(String(archiveContextMenu.value?.node?.nodeType)) }
 function contextNodeCanEdit() { return ['ORG', 'GATEWAY', 'DEVICE'].includes(String(archiveContextMenu.value?.node?.nodeType)) }
+function contextNodeCanCreateOrg(node = archiveContextMenu.value?.node) { return !node || node.nodeType === 'ORG' }
+function contextMenuHeight(node: TreeNode | null) {
+  const type = node?.nodeType
+  const itemCount = type === 'DEVICE' ? 3 : type === 'GATEWAY' ? 6 : type === 'ORG' ? 7 : 2
+  const dividerCount = type === 'DEVICE' ? 1 : type ? 2 : 0
+  return 16 + itemCount * 46 + dividerCount * 9
+}
 
 async function runArchiveContextAction(action: 'create-org' | 'bind' | 'add-gateway' | 'add-device' | 'copy' | 'edit' | 'delete' | 'refresh') {
+  const node = archiveContextMenu.value?.node
+  if (action === 'create-org' && !contextNodeCanCreateOrg(node)) return
+  if (action === 'bind' && !(node?.nodeType === 'ORG' || node?.nodeType === 'GATEWAY')) return
+  if (action === 'add-gateway' && node?.nodeType !== 'ORG') return
+  if (action === 'add-device' && node?.nodeType !== 'GATEWAY') return
+  if (action === 'copy' && !['ORG', 'GATEWAY'].includes(String(node?.nodeType))) return
+  if (['edit', 'delete'].includes(action) && !['ORG', 'GATEWAY', 'DEVICE'].includes(String(node?.nodeType))) return
   closeArchiveContextMenu()
-  if (action === 'create-org') return openAddBySelection()
+  if (action === 'create-org') return openOrg(node?.nodeType === 'ORG' ? node.id : 0)
   if (action === 'bind') return openBindDevices()
   if (action === 'add-gateway') return openGatewayForSelectedOrg()
-  if (action === 'add-device') return openAddBySelection()
+  if (action === 'add-device') return openDevice(node || undefined)
   if (action === 'copy') return duplicateSelection()
   if (action === 'edit') return editSelected()
   if (action === 'delete') return deleteSelected()
@@ -1558,9 +1572,13 @@ async function loadLookups() {
   modelOptions.value = publishedModels
   publishedCatalogTree.value = onlyPublishedModels(productTree)
   const firstRoot = roots[0]
-  if (!selectedRootOrgId.value && firstRoot) {
+  const currentRootStillExists = Boolean(selectedRootOrgId.value) && roots.some((item) => String(item.id) === String(selectedRootOrgId.value))
+  if ((!currentRootStillExists || !selectedRootOrgId.value) && firstRoot) {
     ignoreNextTreeWatch = true
     selectedRootOrgId.value = String(firstRoot.id)
+  } else if (!firstRoot) {
+    ignoreNextTreeWatch = true
+    selectedRootOrgId.value = ''
   }
 }
 
@@ -2264,15 +2282,15 @@ onBeforeUnmount(() => {
             @click.stop
             @contextmenu.prevent.stop
           >
-            <button @click="runArchiveContextAction('create-org')"><span>新增组织</span><small>园区层级</small></button>
-            <button :disabled="!contextNodeCanBind()" @click="runArchiveContextAction('bind')"><span>绑定设备</span><small>园区或网关</small></button>
-            <button :disabled="!contextNodeIsOrg()" @click="runArchiveContextAction('add-gateway')"><span>添加网关</span><small>当前园区</small></button>
-            <button :disabled="!contextNodeIsGateway()" @click="runArchiveContextAction('add-device')"><span>新增设备</span><small>当前网关</small></button>
-            <div class="archive-context-divider"></div>
-            <button :disabled="!contextNodeCanCopy()" @click="runArchiveContextAction('copy')"><span>复制</span><small>档案副本</small></button>
-            <button :disabled="!contextNodeCanEdit()" @click="runArchiveContextAction('edit')"><span>编辑</span><small>当前节点</small></button>
-            <button :disabled="!contextNodeCanEdit()" class="danger" @click="runArchiveContextAction('delete')"><span>删除</span><small>级联处理</small></button>
-            <div class="archive-context-divider"></div>
+            <button v-if="contextNodeCanCreateOrg()" @click="runArchiveContextAction('create-org')"><span>新增组织</span><small>园区层级</small></button>
+            <button v-if="contextNodeCanBind()" @click="runArchiveContextAction('bind')"><span>绑定设备</span><small>园区或网关</small></button>
+            <button v-if="contextNodeIsOrg()" @click="runArchiveContextAction('add-gateway')"><span>添加网关</span><small>当前园区</small></button>
+            <button v-if="contextNodeIsGateway()" @click="runArchiveContextAction('add-device')"><span>新增设备</span><small>当前网关</small></button>
+            <div v-if="contextNodeCanCopy() || contextNodeCanEdit()" class="archive-context-divider"></div>
+            <button v-if="contextNodeCanCopy()" @click="runArchiveContextAction('copy')"><span>复制</span><small>档案副本</small></button>
+            <button v-if="contextNodeCanEdit()" @click="runArchiveContextAction('edit')"><span>编辑</span><small>当前节点</small></button>
+            <button v-if="contextNodeCanEdit()" class="danger" @click="runArchiveContextAction('delete')"><span>删除</span><small>级联处理</small></button>
+            <div v-if="contextNodeCanCopy() || contextNodeCanEdit()" class="archive-context-divider"></div>
             <button @click="runArchiveContextAction('refresh')"><span>刷新</span><small>重新读取</small></button>
           </div>
         </aside>
