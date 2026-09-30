@@ -92,9 +92,10 @@ const onMapParkClick = async () => {
 const renderChinaMap = async () => {
   if (!chinaMapEl.value) return
   try {
+    const mapBase = `${import.meta.env.BASE_URL}maps/`
     const [response, wenzhouResponse] = await Promise.all([
-      fetch('https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json'),
-      fetch('https://geo.datav.aliyun.com/areas_v3/bound/330300_full.json')
+      fetch(`${mapBase}china-full.json`),
+      fetch(`${mapBase}wenzhou-full.json`)
     ])
     if (!response.ok) throw new Error('中国地图边界加载失败')
     const geoJson = await response.json()

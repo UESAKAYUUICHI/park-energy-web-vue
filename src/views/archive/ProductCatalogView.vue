@@ -884,7 +884,7 @@ onMounted(async () => { protocolOptions.value = await publishedProtocolVersions(
               </article>
               <article class="panel catalog-version-panel">
                 <div class="panel-head"><h3>版本记录</h3><small>{{ visibleVersions.length }} 个已绑定版本</small></div>
-                <div v-if="visibleVersions.length" class="catalog-version-list"><div v-for="item in visibleVersions" :key="String(item.id)" :class="['catalog-version-row', { active: String(item.id) === String(version.id) }]" @click="chooseVersion(item)"><span><b>{{ item.version_name }}</b><small>{{ item.create_time }}<template v-if="item.source_version_id"> · 来源版本 #{{ item.source_version_id }}</template></small></span><em :class="String(item.status).toLowerCase()">{{ statusLabel(item.status) }}</em><ChevronRight :size="15" /></div></div>
+                <div v-if="visibleVersions.length" class="catalog-version-list"><div v-for="item in visibleVersions" :key="String(item.id)" :class="['catalog-version-row', { active: String(item.id) === String(version.id) }]" @click="chooseVersion(item)"><span><b>{{ item.version_name }}</b><small>{{ displayValue('create_time', item.create_time, item) }}<template v-if="item.source_version_id"> · 来源版本 #{{ item.source_version_id }}</template></small></span><em :class="String(item.status).toLowerCase()">{{ statusLabel(item.status) }}</em><ChevronRight :size="15" /></div></div>
                 <div v-else class="catalog-version-empty"><b>暂无版本记录</b><small>绑定协议后会自动生成正式版本记录。</small></div>
               </article>
               <article class="panel catalog-protocol-bind-panel" :class="{ locked: protocolBound }">

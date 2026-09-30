@@ -215,6 +215,7 @@ export const rbacPage = (path: string, params: Record<string, unknown> = {}) => 
 export const rbacRelations = () => request<RecordRow>('/rbac/relations')
 export const assignUserRoles = (id: unknown, ids: unknown[]) => request<void>(`/rbac/users/${id}/roles`, { method: 'POST', ...json({ ids }) })
 export const assignRolePermissions = (id: unknown, ids: unknown[]) => request<void>(`/rbac/roles/${id}/permissions`, { method: 'POST', ...json({ ids }) })
+export const assignRolePermissionDelta = (id: unknown, addedIds: unknown[], removedIds: unknown[]) => request<void>(`/rbac/roles/${id}/permissions/delta`, { method: 'POST', ...json({ addedIds, removedIds }) })
 export const rbacOrgTree = () => request<RecordRow[]>('/rbac/org-tree')
 export const userOrgScopes = (id: unknown) => request<RecordRow[]>(`/rbac/users/${id}/org-scopes`)
 export const assignUserOrgScopes = (id: unknown, scopes: RecordRow[]) => request<void>(`/rbac/users/${id}/org-scopes`, { method: 'PUT', ...json({ scopes }) })

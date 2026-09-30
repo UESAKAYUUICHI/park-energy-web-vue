@@ -86,10 +86,27 @@ const keyAliases: Record<string, string> = {
   deal_status: 'enabled',
 }
 
+const isoDateTimePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/
+
+/** Keep backend timestamps readable without changing the stored value. */
+export function formatDateTime(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—'
+  const text = String(value).trim()
+  if (!isoDateTimePattern.test(text) && !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(text)) return text
+  return text
+    .replace('T', ' ')
+    .replace(/\.\d{1,9}(?=(Z|[+-]\d{2}:?\d{2})?$)/, '')
+    .replace(/(?:Z|[+-]\d{2}:?\d{2})$/, '')
+    .trim()
+}
+
 export function displayValue(key: string, value: unknown, row?: RecordRow): string {
   if (value === null || value === undefined || value === '') return '—'
   if (typeof value === 'object') return JSON.stringify(value)
   const normalizedKey = keyAliases[normalizeKey(key)] || normalizeKey(key)
+  if (/(^|_)(time|at|date)$/.test(normalizedKey) || /(?:time|_at|_date)/.test(normalizedKey)) {
+    return formatDateTime(value)
+  }
   const raw = String(value)
   const normalizedValue = normalizeValue(value)
   const direct = maps[normalizedKey]?.[raw] || maps[normalizedKey]?.[normalizedValue]

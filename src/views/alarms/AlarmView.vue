@@ -20,6 +20,7 @@ import {
   ShieldOff,
   Trash2,
 } from "@lucide/vue";
+import { formatDateTime } from "@/utils/displayValue";
 import {
   alarmEvent,
   alarmEventAction,
@@ -1114,7 +1115,7 @@ onMounted(() => {
             <strong>{{
               actionLabel(item.action) || item.action
             }}</strong
-            ><small>{{ item.operator_name }} · {{ item.create_time }}</small>
+            ><small>{{ item.operator_name }} · {{ formatDateTime(item.create_time) }}</small>
             <p v-if="item.content">{{ item.content }}</p>
           </div>
         </article>
@@ -1282,7 +1283,7 @@ onMounted(() => {
             <i>V{{ version.version_no }}</i>
             <span
               ><b>{{ version.publisher_name || "system" }}</b
-              ><small>{{ version.publish_time }}</small></span
+              ><small>{{ formatDateTime(version.publish_time) }}</small></span
             >
             <em
               v-if="

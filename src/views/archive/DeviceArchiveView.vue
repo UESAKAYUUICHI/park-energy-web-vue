@@ -3,7 +3,7 @@ import '../../styles/archive-history-fix.css'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useAlertRef } from '@/composables/useAppAlert'
 import { useRoute, useRouter } from 'vue-router'
-import { AlertTriangle, BarChart3, ChevronDown, ChevronRight, Copy, FileText, Pencil, RadioTower, RefreshCw, Search, Trash2, X } from '@lucide/vue'
+import { AlertTriangle, BarChart3, ChevronDown, ChevronRight, FileText, RadioTower, RefreshCw, Search, X } from '@lucide/vue'
 import type { ECharts, EChartsCoreOption } from 'echarts/core'
 import AppConfirmDialog from '@/components/app/AppConfirmDialog.vue'
 import AppDialog from '@/components/app/AppDialog.vue'
@@ -121,6 +121,7 @@ const publishedCatalogTree = ref<RecordRow[]>([])
 const selectedModelTreeKey = ref('')
 const selectedOrgTreeKey = ref('')
 const selectedNode = ref<TreeNode | null>(null)
+const archiveContextMenu = ref<{ x: number; y: number; node: TreeNode | null } | null>(null)
 const archiveSelectionStorageKey = 'park-energy.device-archive.selected-node'
 const showAllData = ref(false)
 const profile = ref<RecordRow>({})
@@ -296,10 +297,7 @@ const filteredPointDrafts = computed(() => pointDrafts.value.filter((point) => {
   const text = [point.point_name, point.point_code, point.data_type, point.business_role].filter(Boolean).join(' ').toLowerCase()
   return (!keyword || text.includes(keyword)) && (!pointRoleFilters.value.length || pointRoleFilters.value.includes(String(point.business_role)))
 }))
-const selectedCanCopy = computed(() => ['ORG', 'GATEWAY'].includes(String(selectedNode.value?.nodeType)))
 const selectedNodeTitle = computed(() => selectedNode.value ? nodeLabel(selectedNode.value) : '请选择左侧节点')
-const createLabel = computed(() => selectedIsGateway.value ? '+新增设备' : '+新增组织')
-const showPrimaryCreate = computed(() => !selectedIsDevice.value && !selectedIsSpace.value && !selectedIsGroup.value)
 const orgTypeOptions = [
   { label: '园区', value: 1 },
   { label: '企业', value: 2 },
@@ -1339,6 +1337,42 @@ function openAddBySelection() {
   if (selectedNode.value.nodeType === 'ORG') return openOrg(selectedNode.value.id)
   if (selectedNode.value.nodeType === 'GATEWAY') return openDevice(selectedNode.value)
 }
+
+function openArchiveContextMenu(event: MouseEvent, node?: TreeNode) {
+  event.preventDefault()
+  event.stopPropagation()
+  if (node) void selectNode(node)
+  const target = node || selectedNode.value
+  const width = 196
+  const height = target ? 330 : 210
+  archiveContextMenu.value = {
+    x: Math.min(event.clientX, Math.max(8, window.innerWidth - width - 8)),
+    y: Math.min(event.clientY, Math.max(8, window.innerHeight - height - 8)),
+    node: target,
+  }
+}
+
+function closeArchiveContextMenu() {
+  archiveContextMenu.value = null
+}
+
+function contextNodeIsOrg() { return archiveContextMenu.value?.node?.nodeType === 'ORG' }
+function contextNodeIsGateway() { return archiveContextMenu.value?.node?.nodeType === 'GATEWAY' }
+function contextNodeCanBind() { return contextNodeIsOrg() || contextNodeIsGateway() }
+function contextNodeCanCopy() { return ['ORG', 'GATEWAY'].includes(String(archiveContextMenu.value?.node?.nodeType)) }
+function contextNodeCanEdit() { return ['ORG', 'GATEWAY', 'DEVICE'].includes(String(archiveContextMenu.value?.node?.nodeType)) }
+
+async function runArchiveContextAction(action: 'create-org' | 'bind' | 'add-gateway' | 'add-device' | 'copy' | 'edit' | 'delete' | 'refresh') {
+  closeArchiveContextMenu()
+  if (action === 'create-org') return openAddBySelection()
+  if (action === 'bind') return openBindDevices()
+  if (action === 'add-gateway') return openGatewayForSelectedOrg()
+  if (action === 'add-device') return openAddBySelection()
+  if (action === 'copy') return duplicateSelection()
+  if (action === 'edit') return editSelected()
+  if (action === 'delete') return deleteSelected()
+  return refreshSelected()
+}
 function openGatewayForSelectedOrg() {
   if (!selectedNode.value || selectedNode.value.nodeType !== 'ORG') return
   openGateway(selectedNode.value.id)
@@ -2140,11 +2174,12 @@ watch(activeArchiveTab, (tab) => {
     void loadMetricView()
   }
 })
-onMounted(() => { window.addEventListener('resize', resizeCharts); void loadAll() })
+onMounted(() => { window.addEventListener('resize', resizeCharts); window.addEventListener('click', closeArchiveContextMenu); void loadAll() })
 onBeforeUnmount(() => {
   if (treeTimer) clearTimeout(treeTimer)
   if (detailContextTimer) clearTimeout(detailContextTimer)
   window.removeEventListener('resize', resizeCharts)
+  window.removeEventListener('click', closeArchiveContextMenu)
   overviewRealtimeChart?.dispose()
   deviceRealtimeChart?.dispose()
   detailRealtimeChart?.dispose()
@@ -2194,7 +2229,7 @@ onBeforeUnmount(() => {
             <button class="quiet" @click="expandAll"><ChevronDown :size="15" />全展开</button>
             <button class="quiet" @click="collapseAll"><ChevronRight :size="15" />全折叠</button>
           </div>
-          <div class="archive-tree-list">
+          <div class="archive-tree-list" @contextmenu.prevent="openArchiveContextMenu($event)">
             <AppLoadingState v-if="treeLoading && !visibleTreeRows.length" />
             <div v-else-if="!visibleTreeRows.length" class="empty-state">暂无组织档案。</div>
             <button
@@ -2205,6 +2240,7 @@ onBeforeUnmount(() => {
               :class="{ active: selectedNode && nodeKey(selectedNode) === nodeKey(entry.node) }"
               :style="{ paddingLeft: `${10 + entry.level * 18}px` }"
               @click="selectNode(entry.node)"
+              @contextmenu.prevent.stop="openArchiveContextMenu($event, entry.node)"
             >
               <span class="tree-toggle" :class="{ placeholder: !hasChildren(entry.node) }" @click.stop="hasChildren(entry.node) && toggleNode(entry.node)">
                 <ChevronDown v-if="expandedKeys.has(nodeKey(entry.node))" :size="15" />
@@ -2221,24 +2257,27 @@ onBeforeUnmount(() => {
               ></span>
             </button>
           </div>
+          <div
+            v-if="archiveContextMenu"
+            class="archive-context-menu"
+            :style="{ left: `${archiveContextMenu.x}px`, top: `${archiveContextMenu.y}px` }"
+            @click.stop
+            @contextmenu.prevent.stop
+          >
+            <button @click="runArchiveContextAction('create-org')"><span>新增组织</span><small>园区层级</small></button>
+            <button :disabled="!contextNodeCanBind()" @click="runArchiveContextAction('bind')"><span>绑定设备</span><small>园区或网关</small></button>
+            <button :disabled="!contextNodeIsOrg()" @click="runArchiveContextAction('add-gateway')"><span>添加网关</span><small>当前园区</small></button>
+            <button :disabled="!contextNodeIsGateway()" @click="runArchiveContextAction('add-device')"><span>新增设备</span><small>当前网关</small></button>
+            <div class="archive-context-divider"></div>
+            <button :disabled="!contextNodeCanCopy()" @click="runArchiveContextAction('copy')"><span>复制</span><small>档案副本</small></button>
+            <button :disabled="!contextNodeCanEdit()" @click="runArchiveContextAction('edit')"><span>编辑</span><small>当前节点</small></button>
+            <button :disabled="!contextNodeCanEdit()" class="danger" @click="runArchiveContextAction('delete')"><span>删除</span><small>级联处理</small></button>
+            <div class="archive-context-divider"></div>
+            <button @click="runArchiveContextAction('refresh')"><span>刷新</span><small>重新读取</small></button>
+          </div>
         </aside>
 
         <section class="archive-main-panel">
-          <div class="archive-toolbar">
-              <div class="archive-toolbar-actions">
-              <button v-if="showPrimaryCreate" class="primary add-action" @click="openAddBySelection">{{ createLabel }}</button>
-              <button v-if="selectedIsOrg || selectedIsGateway" class="quiet add-action bind-action" @click="openBindDevices">绑定设备</button>
-              <button v-if="selectedIsOrg" class="quiet add-action" @click="openGatewayForSelectedOrg">+添加网关</button>
-              <button class="icon-btn" :disabled="!selectedCanCopy" title="复制" aria-label="复制" @click="duplicateSelection"><Copy :size="16" /></button>
-              <button class="icon-btn" :disabled="!selectedCanMutate" title="编辑" aria-label="编辑" @click="editSelected"><Pencil :size="16" /></button>
-              <button class="icon-btn danger-text" :disabled="!selectedCanDelete" title="删除" aria-label="删除" @click="deleteSelected"><Trash2 :size="16" /></button>
-              <button class="icon-btn" title="刷新" aria-label="刷新" @click="refreshSelected"><RefreshCw :size="16" /></button>
-            </div>
-            <div class="archive-toolbar-meta">
-              <span>{{ selectedNodeTitle }}</span>
-            </div>
-          </div>
-
           <div v-if="!selectedNode" class="archive-main-empty">请选择左侧档案节点。</div>
 
           <template v-else>
@@ -2438,7 +2477,7 @@ onBeforeUnmount(() => {
                   <div v-else class="archive-inspection-list">
                     <div v-for="row in filteredInspectionRecords" :key="String(row.id)">
                       <b>{{ displayLabel('command_type', row.command_type || '运维操作', row) }}</b>
-                      <span>{{ row.target_sn || row.request_time || '—' }}</span>
+                      <span>{{ row.target_sn || displayLabel('request_time', row.request_time, row) }}</span>
                       <small>{{ displayLabel('status', row.status, row) }}</small>
                     </div>
                  </div>
@@ -2576,7 +2615,7 @@ onBeforeUnmount(() => {
                       <span class="archive-alarm-badge" :class="`level-${String(row.alarm_level || 'info').toLowerCase()}`">{{ alarmLevelText(row.alarm_level) }}</span>
                       <span class="archive-alarm-badge" :class="String(row.deal_status ?? '0') === '0' ? 'status-open' : 'status-closed'">{{ dealStatusText(row.deal_status) }}</span>
                       <div class="archive-alarm-order"><b>{{ row.work_order_no || '未创建工单' }}</b><small>{{ row.work_order_no ? workOrderStatusText(row.work_order_status) : '等待处置' }}</small></div>
-                      <time>{{ row.alarm_time || '—' }}</time>
+                      <time>{{ displayLabel('alarm_time', row.alarm_time, row) }}</time>
                     </div>
                   </template>
                 </div>

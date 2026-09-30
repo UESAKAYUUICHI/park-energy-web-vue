@@ -9,6 +9,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { LegacyGridContainLabel } from 'echarts/features'
 import { dashboard } from '@/api/platform'
 import type { RecordRow } from '@/types/domain'
+import { formatDateTime } from '@/utils/displayValue'
 
 use([LineChart, PieChart, GridComponent, TooltipComponent, LegacyGridContainLabel, CanvasRenderer])
 
@@ -144,7 +145,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resizeCharts); hour
 
       <article class="panel alarm-panel">
         <div class="panel-head"><div><h2>最新告警</h2><p>组织权限范围内最近事件</p></div><button class="link-button" @click="router.push('/alarms/events')">全部告警</button></div>
-        <div class="table-wrap"><table><thead><tr><th>设备</th><th>告警内容</th><th>级别</th><th>发生时间</th></tr></thead><tbody><tr v-for="row in alarms" :key="String(field(row, 'id'))"><td>{{ field(row, 'device_name', 'deviceName') || '-' }}</td><td>{{ field(row, 'alarm_content', 'alarmContent', 'rule_name', 'ruleName') || '-' }}</td><td>{{ field(row, 'alarm_level', 'alarmLevel') || '-' }}</td><td>{{ field(row, 'alarm_time', 'alarmTime') || '-' }}</td></tr><tr v-if="!alarms.length"><td colspan="4" class="empty-cell">暂无告警数据</td></tr></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>设备</th><th>告警内容</th><th>级别</th><th>发生时间</th></tr></thead><tbody><tr v-for="row in alarms" :key="String(field(row, 'id'))"><td>{{ field(row, 'device_name', 'deviceName') || '-' }}</td><td>{{ field(row, 'alarm_content', 'alarmContent', 'rule_name', 'ruleName') || '-' }}</td><td>{{ field(row, 'alarm_level', 'alarmLevel') || '-' }}</td><td>{{ formatDateTime(field(row, 'alarm_time', 'alarmTime')) }}</td></tr><tr v-if="!alarms.length"><td colspan="4" class="empty-cell">暂无告警数据</td></tr></tbody></table></div>
       </article>
     </div>
   </section>

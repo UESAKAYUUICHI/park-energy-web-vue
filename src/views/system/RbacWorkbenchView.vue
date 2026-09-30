@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useAlertRef } from '@/composables/useAppAlert'
 import { ChevronDown, ChevronRight, RefreshCw, Save, Search } from '@lucide/vue'
-import { assignRolePermissions, assignUserRoles, rbac, rbacPage, rbacRelations } from '@/api/platform'
+import { assignRolePermissionDelta, assignUserRoles, rbac, rbacPage, rbacRelations } from '@/api/platform'
 import type { RecordRow } from '@/types/domain'
 
 interface TreeNode { item: RecordRow; level: number }
@@ -189,7 +189,9 @@ async function saveUserRoles(userId: unknown, roleId: unknown) {
   error.value = ''
   try {
     await assignUserRoles(userId, roleId == null ? [] : [Number(roleId)])
-    await loadRelations()
+    const unchanged = userRoles.value.filter((item) => !sameId(item.userId ?? item.user_id, userId))
+    const updated = roleId == null ? unchanged : [...unchanged, { userId, roleId: Number(roleId) }]
+    relations.value = { ...relations.value, userRoles: updated }
     if (sameId(selectedUserId.value, userId) && selectedUser.value) selectUser(selectedUser.value)
     saveState.value = '已自动保存'
   } catch (e) {
@@ -205,8 +207,18 @@ async function saveRolePermissions(roleId: unknown, permissionIds: string[]) {
   saveState.value = '正在保存'
   error.value = ''
   try {
-    await assignRolePermissions(roleId, permissionIds.map(Number))
-    await loadRelations()
+    const currentIds = new Set(permissionIds)
+    const previousIds = new Set(rolePermissions.value
+      .filter((item) => sameId(item.roleId ?? item.role_id, roleId))
+      .map((item) => String(item.permissionId ?? item.permission_id)))
+    const addedIds = [...currentIds].filter((id) => !previousIds.has(id)).map(Number)
+    const removedIds = [...previousIds].filter((id) => !currentIds.has(id)).map(Number)
+    if (addedIds.length || removedIds.length) {
+      await assignRolePermissionDelta(roleId, addedIds, removedIds)
+      const untouched = rolePermissions.value.filter((item) => !sameId(item.roleId ?? item.role_id, roleId))
+      const updated = [...untouched, ...[...currentIds].map((permissionId) => ({ roleId, permissionId: Number(permissionId) }))]
+      relations.value = { ...relations.value, rolePermissions: updated }
+    }
     if (sameId(selectedRoleId.value, roleId) && selectedRole.value) selectRole(selectedRole.value)
     permissionsDirty.value = false
     saveState.value = '已保存'
