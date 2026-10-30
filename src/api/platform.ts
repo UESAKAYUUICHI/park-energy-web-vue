@@ -248,3 +248,10 @@ export const updateDeviceContext = (id: unknown, body: RecordRow) => request<Rec
 export const saveDeviceAttributeOverrides = (id: unknown, values: RecordRow[]) => request<RecordRow[]>(`/devices/${id}/attributes`, { method: 'PUT', ...json({ values }) })
 export const deployDevice = (id: unknown, body: RecordRow) => request<RecordRow>(`/devices/${id}/deployment`, { method: 'PUT', ...json(body) })
 export const unbindDevice = (id: unknown, body: RecordRow = {}) => request<RecordRow>(`/devices/${id}/unbind`, { method: 'POST', ...json(body) })
+export const aiDiagnosisWorkbench = () => request<RecordRow>('/ai-diagnosis/workbench')
+export const evaluateAiScene = (body: RecordRow) => request<RecordRow>('/ai-diagnosis/evaluate', { method: 'POST', ...json(body) })
+export const createAiDiagnosisWorkOrder = (body: RecordRow) => request<RecordRow>('/ai-diagnosis/create-work-order', { method: 'POST', ...json(body) })
+export const callAiLlmProxy = (body: RecordRow) => request<RecordRow>('/ai-diagnosis/llm-proxy', { method: 'POST', ...json(body) })
+export const resetAiDemoFlow = () => request<RecordRow>('/ai-diagnosis/reset-demo-flow', { method: 'POST' })
+export const parseProtocolDoc = (body: RecordRow) => request<RecordRow>('/ai-diagnosis/parse-protocol-doc', { method: 'POST', ...json(body) })
+export const uploadProtocolPdf = (file: File) => { const body = new FormData(); body.append('file', file); return request<RecordRow>('/ai-diagnosis/upload-protocol-pdf', { method: 'POST', body }) }
