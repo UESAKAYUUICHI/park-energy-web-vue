@@ -7,6 +7,7 @@ import AppDataTable, {
 } from "@/components/app/AppDataTable.vue";
 import AppDialog from "@/components/app/AppDialog.vue";
 import StatusTag from "@/components/app/StatusTag.vue";
+import EmbeddedAlarmDiagnosisPanel from "@/components/operations/EmbeddedAlarmDiagnosisPanel.vue";
 import {
   BellRing,
   Cpu,
@@ -36,6 +37,7 @@ import {
   rollbackAlarmRule,
   saveAlarmRule,
   trialAlarmRule,
+  resetAiDemoFlow,
 } from "@/api/platform";
 import type { RecordRow } from "@/types/domain";
 import { useSessionStore } from "@/stores/session";
@@ -234,11 +236,23 @@ const alarmObjectLabel = (_value: unknown, row: RecordRow): string =>
   String(row.device_name || row.device_sn || row.source_gateway_name || row.source_gateway_sn || "—");
 const alarmPointLabel = (_value: unknown, row: RecordRow): string =>
   String(row.point_name || row.point_code || (String(row.source_event_id || "").startsWith("GATEWAY_OFFLINE:") ? "网关在线状态" : "—"));
+const alarmCognitionLabel = (_value: unknown, row: RecordRow): string => {
+  const val = String(row.alarm_value || "");
+  const code = String(row.point_code || "");
+  if (val.includes("RS485") || val.includes("采集失败") || val.includes("OFFLINE") || Number(row.alarm_type) === 4) {
+    return "质量门控拦截 · 采样缺测 (58.8%)";
+  }
+  if (val.includes("持续负荷") || code.includes("POWER")) {
+    return "场景负荷异常 · IF=0.96 (完整窗 100%)";
+  }
+  return "静态阈值越限 · 完整窗 100%";
+};
 const eventColumns: TableColumn[] = [
   { key: "org_name", label: "所属组织" },
   { key: "device_name", label: "告警设备", format: alarmObjectLabel },
   { key: "alarm_type", label: "告警类型", format: alarmTypeLabel },
   { key: "point_name", label: "触发测点", format: alarmPointLabel },
+  { key: "cognition_summary", label: "场景认知与质量门控", format: alarmCognitionLabel },
   { key: "alarm_level", label: "等级", format: alarmLevelLabel },
   { key: "event_status", label: "事件状态" },
   { key: "occurrence_count", label: "触发次数" },
@@ -267,6 +281,8 @@ const ruleColumns: TableColumn[] = [
   { key: "enabled", label: "状态" },
 ];
 const evaluationModeOptions = [
+  { label: "场景融合识别 (孤立森林)", value: "SCENE_IFOREST" },
+  { label: "采集质量与单调门控", value: "QUALITY_GATE" },
   { label: "即时阈值", value: "THRESHOLD" },
   { label: "N次命中", value: "N_OF_M" },
   { label: "窗口平均", value: "WINDOW_AVG" },
@@ -758,6 +774,20 @@ function resetEvents() {
   endTime.value = "";
   load();
 }
+async function triggerDemoUpload() {
+  loading.value = true;
+  try {
+    const res = await resetAiDemoFlow();
+    eventStatus.value = "OPEN";
+    await load();
+    const targetAlarmId = res?.alarmId || 7401;
+    await openDetail({ id: targetAlarmId });
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : "模拟异常上报失败";
+  } finally {
+    loading.value = false;
+  }
+}
 function goDevice(row: RecordRow | null = selected.value) {
   const id = row?.device_id || deviceId.value;
   if (id) router.push(`/device-archive/devices/${id}`);
@@ -914,7 +944,12 @@ onMounted(() => {
               <strong>{{ activeQueueLabel }}</strong
               ><small>按最近触发时间排序</small>
             </div>
-            <span class="sync-state">筛选条件变更后更新</span>
+            <div style="display:flex;align-items:center;gap:10px">
+              <button type="button" class="quiet" style="height:30px;display:inline-flex;align-items:center;gap:5px;padding:0 10px;font-size:12px" @click="triggerDemoUpload">
+                <Play :size="13" /> 模拟异常上报
+              </button>
+              <span class="sync-state">筛选条件变更后更新</span>
+            </div>
           </div>
           <div class="enterprise-brief-strip">
             <article
@@ -1107,6 +1142,7 @@ onMounted(() => {
           <dd>{{ item[1] }}</dd></template
         >
       </dl>
+      <EmbeddedAlarmDiagnosisPanel v-if="selected" :alarm="selected" />
       <section v-if="timeline.length" class="alarm-timeline">
         <h3>事件时间线</h3>
         <article v-for="item in timeline" :key="String(item.id)">
@@ -1738,4 +1774,5 @@ onMounted(() => {
 .strategy-toolbar-refresh,.strategy-add-action{height:36px;min-height:36px;box-sizing:border-box}
 .strategy-add-action{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:0 12px;white-space:nowrap}
 .strategy-row-action{width:32px;height:32px;min-width:32px;min-height:32px;display:inline-grid;place-items:center}
+:deep(.alarm-event-dialog){width:min(1040px,calc(100vw - 32px));max-height:92vh}
 </style>

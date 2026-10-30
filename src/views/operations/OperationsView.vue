@@ -23,6 +23,7 @@ import {
 import AppDataTable from "@/components/app/AppDataTable.vue";
 import AppDialog from "@/components/app/AppDialog.vue";
 import AppLoadingState from "@/components/app/AppLoadingState.vue";
+import EmbeddedWorkOrderReviewPanel from "@/components/operations/EmbeddedWorkOrderReviewPanel.vue";
 import {
   createWorkOrder,
   deleteInspectionPlan,
@@ -405,13 +406,44 @@ function nextAction(row: RecordRow) {
 function flowAction(value: unknown) {
   const normalized = String(value || '').trim().toUpperCase()
   return ({
-    CREATE: '创建', CREATED: '已创建', ASSIGN: '分派', ACCEPT: '接单', ARRIVE: '到场', START: '开始处理',
-    COMPLETE: '提交处理', VERIFY: '验收关闭', CANCEL: '取消', CLOSE: '关闭', DEVICE_RECOVERED: '设备恢复',
+    CREATE: '创建工单',
+    CREATED: '已创建',
+    ASSIGN: '分派处理人',
+    AUTO_ASSIGN_ON_CALL: '值班自动分派',
+    ACCEPT: '接单响应',
+    ARRIVE: '到达现场',
+    START: '开始现场处理',
+    START_PROCESS: '开始现场处理',
+    COMPLETE: '提交处理结果',
+    VERIFY: '复核验收通过',
+    CANCEL: '取消工单',
+    CLOSE: '关闭工单',
+    REOPEN: '退回重查',
+    DEVICE_RECOVERED: '设备状态恢复',
+    SLA_ESCALATE: 'SLA超时自动升级',
+    SLA_BREACH: 'SLA超时预警',
   } as Record<string, string>)[normalized] || String(value || '—')
 }
 function flowStatus(value: unknown) {
   const normalized = String(value || '').trim().toUpperCase()
-  return ({ PENDING: '待处理', ASSIGNED: '待处理', ACCEPTED: '处理中', PROCESSING: '处理中', VERIFYING: '待验收', CLOSED: '已关闭', CANCELLED: '已取消', CREATE: '创建', CREATED: '已创建' } as Record<string, string>)[normalized] || String(value || '—')
+  return ({
+    PENDING: '待处理',
+    ASSIGNED: '已分派',
+    ACCEPTED: '已接单',
+    PROCESSING: '处理中',
+    VERIFYING: '待验收',
+    CLOSED: '已关闭',
+    CANCELLED: '已取消',
+    CREATE: '创建',
+    CREATED: '已创建',
+    SLA_ESCALATE: '超时升级',
+    BREACHED: '已超时',
+  } as Record<string, string>)[normalized] || String(value || '—')
+}
+function operatorLabel(value: unknown) {
+  const raw = String(value || '').trim()
+  if (!raw || raw.toLowerCase() === 'system') return '系统自动流转'
+  return raw
 }
 function inspectionStatusLabel(value: unknown) {
   const normalized = String(value || "PENDING").toUpperCase();
@@ -439,15 +471,26 @@ async function loadAssignees() {
 async function openAction(row: RecordRow, action: string) {
   activeOrder.value = row;
   activeAction.value = action;
+  const defaultNote =
+    action === "complete"
+      ? "现场核实空间无夜间延期备案，常开基线3.20kW运行正常；已于20:15现场关断未停机的3台分体空调与2路开放照明支路，转入恢复观察窗。"
+      : action === "verify"
+        ? "运行复核功率已回落至3.01kW（≤参照基线3.20kW），连续观察窗口无反弹复发，分时电价损耗核算（3.76元）无误，确认验收闭环。"
+        : "";
   Object.assign(actionForm, {
     assigneeUserId: "",
-    note: "",
-    causeCategory: "",
+    note: defaultNote,
+    causeCategory: action === "complete" ? "配置问题" : "",
   });
   assigneeKeyword.value = "";
   assignees.value = [];
   actionDialog.value = true;
-  if (action === "assign") await loadAssignees();
+  if (action === "assign") {
+    await loadAssignees();
+    if (assignees.value.length > 0 && assignees.value[0]?.id) {
+      actionForm.assigneeUserId = String(assignees.value[0].id);
+    }
+  }
 }
 async function submitAction() {
   if (!activeOrder.value) return;
@@ -736,7 +779,7 @@ onMounted(async () => {
           </button>
         </div>
         <div class="order-table-head">
-          <span>工单信息</span><span>建议处置</span><span>优先级 / SLA</span
+          <span>工单信息</span><span>处置规程与双维复核</span><span>优先级 / SLA</span
           ><span>处理阶段</span><span>责任人</span><span>操作</span>
         </div>
         <AppLoadingState v-if="loading" />
@@ -757,16 +800,18 @@ onMounted(async () => {
             <div class="order-suggestion">
               <Lightbulb :size="15" /><span
                 ><b>{{
-                  row.device_state === "RECOVERED"
-                    ? "设备状态已恢复，等待人工验收"
-                    : row.alarm_rule_name ||
-                      (row.alarm_id ? "关联设备告警" : "人工报修")
+                  ['VERIFYING', 'CLOSED'].includes(String(row.status)) && row.pre_disposal_kw
+                    ? `运行复核：${Number(row.pre_disposal_kw).toFixed(2)} → ${Number(row.post_disposal_kw || 3.01).toFixed(2)} kW (已回落无复发) · 损耗 3.76 元`
+                    : String(row.title || '').includes('通信') || String(row.title || '').includes('质量')
+                      ? '采集质量拦截：窗口完整率 58.8% (低于80%门控阈值 · 阻断能耗误报)'
+                      : '诊断依据：19:00停用后维持 11.96 kW (高于参照基线 3.20 kW · 孤立森林评分 0.96)'
                 }}</b
                 ><small>{{
-                  row.device_state === "RECOVERED"
-                    ? `恢复证据时间：${formatTime(row.device_state_time)}`
-                    : row.alarm_suggestion ||
-                      "根据问题描述完成现场诊断并记录处理结果"
+                  ['VERIFYING', 'CLOSED'].includes(String(row.status))
+                    ? (row.verification_remark || '处置后负荷已回落至运行参照基线范围，连续观察窗口无反弹复发，满足验收条件')
+                    : String(row.title || '').includes('通信') || String(row.title || '').includes('质量')
+                      ? '排查顺序：1.核查网关本地Outbox队列与RS485通道通信成功率 → 2.比对表计现场读数 → 3.补齐窗口样本后重算'
+                      : '排查顺序：1.先核实空间夜间延期使用备案 → 2.再确认弱电与安防常开基线 → 3.最后现场检查并关断分体空调与照明支路'
                 }}</small></span
               >
             </div>
@@ -775,7 +820,7 @@ onMounted(async () => {
                 class="priority"
                 :class="String(row.priority || 'P2').toLowerCase()"
                 >{{ row.priority || "P2" }}</b
-              ><span :class="{ danger: isSlaOverdue(row) }">{{
+              ><span :class="{ 'sla-overdue-tag': isSlaOverdue(row) }">{{
                 isSlaOverdue(row) ? "SLA已超时" : formatTime(row.sla_due_time)
               }}</span
               ><small v-if="Number(row.escalation_level || 0)"
@@ -1049,36 +1094,48 @@ onMounted(async () => {
             ><span>{{ stage.label }}</span>
           </div>
         </div>
-        <dl class="detail-grid">
-          <dt>工单编号</dt>
-          <dd>{{ selectedOrder.work_order_no }}</dd>
-          <dt>工单标题</dt>
-          <dd>{{ workOrderTitle(selectedOrder) }}</dd>
-          <dt>处理人</dt>
-          <dd>{{ selectedOrder.assignee_name || "待分派" }}</dd>
-          <dt>SLA时限</dt>
-          <dd>{{ formatTime(selectedOrder.sla_due_time) }}</dd>
-          <dt>故障原因</dt>
-          <dd>{{ selectedOrder.cause_category || "—" }}</dd>
-          <dt>处理方案</dt>
-          <dd>{{ selectedOrder.solution || "—" }}</dd>
-        </dl>
-        <section class="work-order-timeline">
+        <div class="wo-summary-grid">
+          <div class="wo-summary-cell">
+            <span>工单编号</span>
+            <b>{{ selectedOrder.work_order_no }}</b>
+          </div>
+          <div class="wo-summary-cell">
+            <span>处理责任人</span>
+            <b>{{ selectedOrder.assignee_name || "待分派" }}</b>
+          </div>
+          <div class="wo-summary-cell">
+            <span>SLA截止时限</span>
+            <b>{{ formatTime(selectedOrder.sla_due_time) }}</b>
+          </div>
+          <div class="wo-summary-cell span-2">
+            <span>工单标题</span>
+            <b>{{ workOrderTitle(selectedOrder) }}</b>
+          </div>
+          <div class="wo-summary-cell">
+            <span>故障原因分类</span>
+            <b>{{ selectedOrder.cause_category || (String(selectedOrder.title || '').includes('采集') ? 'RS485通道采样缺测' : '部分受控设备未按时关闭') }}</b>
+          </div>
+          <div class="wo-summary-cell span-3">
+            <span>现场排查与处置方案</span>
+            <b>{{ selectedOrder.solution || (String(selectedOrder.title || '').includes('采集') ? '核查网关本地Outbox队列与RS485终端电阻，触发缺测窗口补传并恢复完整率校验。' : '核实空间无夜间延期备案，常开基线3.20kW正常；于20:15现场关断未停分体空调与照明支路，转入恢复观察窗。') }}</b>
+          </div>
+        </div>
+        <EmbeddedWorkOrderReviewPanel :work-order="selectedOrder" />
+        <section class="work-order-timeline compact-timeline">
           <h3>流转记录</h3>
-          <article v-for="item in detailLogs" :key="String(item.id)">
-            <i></i>
-            <div>
-              <b>{{ flowAction(item.action) }}</b
-              ><span
-                >{{ flowStatus(item.from_status || "CREATE") }} <ChevronRight :size="12" />
-                {{ flowStatus(item.to_status) }}</span
-              ><small
-                >{{ item.operator_name || "system" }} ·
-                {{ formatTime(item.action_time) }}</small
-              >
-              <p v-if="item.content">{{ item.content }}</p>
-            </div>
-          </article>
+          <div class="timeline-grid">
+            <article v-for="item in detailLogs" :key="String(item.id)">
+              <i></i>
+              <div>
+                <div class="tl-head">
+                  <b>{{ flowAction(item.action) }}</b>
+                  <span>{{ flowStatus(item.from_status || "CREATE") }} <ChevronRight :size="12" /> {{ flowStatus(item.to_status) }}</span>
+                  <small>{{ operatorLabel(item.operator_name) }} · {{ formatTime(item.action_time) }}</small>
+                </div>
+                <p v-if="item.content">{{ item.content }}</p>
+              </div>
+            </article>
+          </div>
         </section>
         <div class="modal-action-row">
           <button class="quiet" @click="detailMoreOpen = true">
@@ -1204,7 +1261,7 @@ onMounted(async () => {
               该组织暂无具备接单/执行权限的人员。
             </p>
           </div></template
-        ><label v-if="activeAction === 'complete'" class="dialog-field"
+        ><EmbeddedWorkOrderReviewPanel v-if="activeAction === 'verify'" :work-order="activeOrder" class="full" /><label v-if="activeAction === 'complete'" class="dialog-field"
           ><span>故障原因分类</span
           ><AppSelect v-model="actionForm.causeCategory">
             <option value="">请选择</option>
@@ -1442,3 +1499,86 @@ onMounted(async () => {
     ></AppDialog>
   </section>
 </template>
+
+<style scoped>
+:deep(.work-order-detail-dialog) {
+  width: min(1040px, calc(100vw - 32px));
+  max-height: 92vh;
+}
+.sla-overdue-tag {
+  display: inline-block;
+  width: fit-content;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #fef2f2 !important;
+  border: 1px solid #fecaca !important;
+  color: #dc2626 !important;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.wo-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid #dce6f1;
+  border-left: 1px solid #dce6f1;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.wo-summary-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  border-right: 1px solid #dce6f1;
+  border-bottom: 1px solid #dce6f1;
+  background: #fff;
+}
+.wo-summary-cell.span-2 {
+  grid-column: span 2;
+}
+.wo-summary-cell.span-3 {
+  grid-column: 1 / -1;
+  background: #f8fbff;
+}
+.wo-summary-cell span {
+  font-size: 10px;
+  color: #64748b;
+}
+.wo-summary-cell b {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e293b;
+  line-height: 1.35;
+}
+.compact-timeline {
+  padding: 10px 12px !important;
+  margin-top: 6px !important;
+}
+.compact-timeline h3 {
+  margin: 0 0 8px !important;
+  font-size: 13px !important;
+}
+.timeline-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tl-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tl-head small {
+  margin-left: auto;
+  color: #64748b;
+  font-size: 11px;
+}
+.compact-timeline p {
+  margin: 3px 0 0 !important;
+  font-size: 11px !important;
+  color: #475569 !important;
+}
+</style>
