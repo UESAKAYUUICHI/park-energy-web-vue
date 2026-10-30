@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Activity, Gauge, History } from '@lucide/vue'
+import { Activity, Gauge, History, TrendingUp } from '@lucide/vue'
 import PowerEfficiencyWorkbench from '@/views/energy/PowerEfficiencyWorkbench.vue'
 
-type Tab = 'three-phase-monitor' | 'power-efficiency-analysis' | 'energy-consume-statistics'
+type Tab = 'three-phase-monitor' | 'power-efficiency-analysis' | 'energy-consume-statistics' | 'data-model-predict'
 const route = useRoute()
 const router = useRouter()
 const tab = computed<Tab>(() => {
@@ -14,9 +14,11 @@ const tab = computed<Tab>(() => {
     history: 'power-efficiency-analysis',
     statistics: 'energy-consume-statistics',
     quality: 'energy-consume-statistics',
+    predict: 'data-model-predict',
     'three-phase-monitor': 'three-phase-monitor',
     'power-efficiency-analysis': 'power-efficiency-analysis',
     'energy-consume-statistics': 'energy-consume-statistics',
+    'data-model-predict': 'data-model-predict',
   }
   return aliases[value] || 'three-phase-monitor'
 })
@@ -24,10 +26,11 @@ const tabs: Array<{ key: Tab; label: string; icon: typeof Activity; description:
   { key: 'three-phase-monitor', label: '三相监测', icon: Activity, description: '三相平衡、电压电流越限、电网频率质量' },
   { key: 'power-efficiency-analysis', label: '功率分析', icon: Gauge, description: '功率因数、无功损耗、负载率趋势' },
   { key: 'energy-consume-statistics', label: '能耗统计', icon: History, description: '日周月能耗、峰谷波动、累计趋势' },
+  { key: 'data-model-predict', label: '负荷预测与调控', icon: TrendingUp, description: '时序负荷预测、尖峰需量风险热力与分时电价错峰调控' },
 ]
 const activeTab = computed(() => tabs.find((item) => item.key === tab.value) ?? tabs[0]!)
 function switchTab(next: string) {
-  const normalized = ['three-phase-monitor', 'power-efficiency-analysis', 'energy-consume-statistics'].includes(next) ? next as Tab : 'three-phase-monitor'
+  const normalized = ['three-phase-monitor', 'power-efficiency-analysis', 'energy-consume-statistics', 'data-model-predict'].includes(next) ? next as Tab : 'three-phase-monitor'
   void router.replace({ query: normalized === 'three-phase-monitor' ? {} : { tab: normalized } })
 }
 </script>

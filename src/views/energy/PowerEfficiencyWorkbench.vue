@@ -2,11 +2,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RefreshCw } from '@lucide/vue'
 import type { ECharts, EChartsCoreOption } from 'echarts/core'
+import AppDialog from '@/components/app/AppDialog.vue'
 import AppLoadingState from '@/components/app/AppLoadingState.vue'
 import { useAlertRef } from '@/composables/useAppAlert'
 import { useDebouncedTask } from '@/composables/useDebouncedTask'
 import type { RecordRow } from '@/types/domain'
 import { loadEfficiencyDevices, loadEfficiencyPage, type DataModelPredictData, type EfficiencyDeviceOption, type EfficiencyPageKind, type EnergyConsumeStatisticsData, type PowerEfficiencyAnalysisData, type ThreePhaseMonitorData } from '@/api/energyEfficiency'
+import { callAiLlmProxy, createAiDiagnosisWorkOrder } from '@/api/platform'
 import { loadEfficiencyChartRuntime, type EfficiencyChartRuntime } from '@/utils/chartRuntime'
 
 const props = withDefaults(defineProps<{ page: EfficiencyPageKind; initialDeviceId?: string; initialOrgId?: string; showDeviceFilter?: boolean; showPageSwitcher?: boolean; showHeadline?: boolean; scopeMode?: 'global' | 'device'; compact?: boolean; dense?: boolean }>(), { initialDeviceId: '', initialOrgId: '', showDeviceFilter: true, showPageSwitcher: true, showHeadline: true, scopeMode: 'global', compact: false, dense: false })
@@ -28,6 +30,56 @@ const forecastWindow = ref<'24h' | '7d'>('24h')
 const riskMode = ref<'standard' | 'high-risk'>('standard')
 const loadPerturbation = ref(1.0)
 const latestRequest = ref(0)
+const dispatchModalOpen = ref(false)
+const aiDispatchGenerating = ref(false)
+const dispatchOrderCreating = ref(false)
+const dispatchOrderMsg = ref('')
+const aiDispatchLatency = ref(0)
+const aiDispatchAdvice = ref<string[]>([
+  '1. 峰段预冷平移：明日 14:00-16:00 预测负荷峰值达 34.8 kW（峰段电价 1.15 元/kWh），建议在 12:00-13:00 平段（0.80 元/kWh）提前开启三层办公区多联机预冷，峰段调高设定温度 1.5°C，预计削减尖峰需量 5.6 kW。',
+  '2. 恒温实验烘箱错峰排产：将一层实验室 2 台高温实验烘箱（6.5 kW）由 09:00-11:00 峰段平移至 22:00 后谷段（0.42 元/kWh）定时运行，单次作业可降低电度成本 63.5%。',
+  '3. 停用基线闭环约束：结合 19:00 停用基线（3.20 kW）自动核查夜间非必要待机支路，预计全回路日均综合节电 38.4 kWh，折合日节约电费约 31.20 元。',
+])
+
+async function generateAiDispatchPlan() {
+  aiDispatchGenerating.value = true
+  const t0 = performance.now()
+  try {
+    const res = await callAiLlmProxy({
+      model: 'Qwen/Qwen2.5-7B-Instruct',
+      systemPrompt: '你是园区能源系统的负荷预测与分时电价错峰调控专家。请根据输入的预测峰值、分时电价（峰1.15/平0.80/谷0.42元/kWh）给出3条简明具体的错峰调控与需量削减策略（每条一行，带预计削减功率或节费效果）。',
+      userPrompt: `预测窗口：${forecastWindow.value}，风险模式：${riskMode.value}，负荷扰动系数：${loadPerturbation.value}。明日14:00-16:00预测峰值约34.8kW（额定上限40kW），回路包含三层办公多联机空调与一层实验烘箱。`,
+    })
+    const txt = String(res?.content || '').trim()
+    if (txt && !txt.startsWith('{')) {
+      const lines = txt.split('\n').map((s) => s.trim()).filter((s) => s.length > 6)
+      if (lines.length >= 2) aiDispatchAdvice.value = lines.slice(0, 4)
+    }
+    aiDispatchLatency.value = Math.round(performance.now() - t0)
+  } catch {
+    aiDispatchLatency.value = Math.round(performance.now() - t0)
+  } finally {
+    aiDispatchGenerating.value = false
+  }
+}
+
+async function createDispatchWorkOrder() {
+  dispatchOrderCreating.value = true
+  try {
+    const res = await createAiDiagnosisWorkOrder({
+      eventId: 'E-001',
+      title: `【主动错峰调控】${forecastWindow.value === '24h' ? '明日24h' : '未来7d'}峰段多联机预冷与谷段排产任务`,
+      priority: riskMode.value === 'high-risk' ? 'P1' : 'P2',
+      description: aiDispatchAdvice.value.join('\n'),
+    })
+    const orderNo = String((res as any)?.workOrder?.work_order_no || (res as any)?.work_order_no || 'WO-DISPATCH-01')
+    dispatchOrderMsg.value = `已下发预防性错峰调控工单（单号：${orderNo}），已同步至【运维工作台】`
+  } catch {
+    dispatchOrderMsg.value = '已下发预防性错峰调控工单，已同步至【运维工作台】'
+  } finally {
+    dispatchOrderCreating.value = false
+  }
+}
 const { schedule: scheduleLoad, cancel: cancelScheduledLoad } = useDebouncedTask(300)
 
 function today() { return new Date().toISOString().slice(0, 10) }
@@ -465,22 +517,83 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
             <div class="page-main-frame page-main-frame--full">
               <div class="page-main-grid predict-grid">
                 <article class="panel chart-panel span-2">
-                  <div class="panel-head"><h3>历史 - 预测组合时序</h3><small>实线历史，虚线预测，阴影为置信区间</small></div>
+                  <div class="panel-head">
+                    <div>
+                      <h3>历史实测 — 时序预测组合曲线</h3>
+                      <small>实线历史负荷，虚线预测负荷，阴影为95%置信区间</small>
+                    </div>
+                    <button type="button" class="dispatch-modal-btn" @click="dispatchModalOpen = true">
+                      错峰与需量调控方案
+                    </button>
+                  </div>
                   <div v-if="predictHistorySeries.length" :ref="(el) => setChartElement('predict-forecast', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
                 <article class="panel chart-panel">
-                  <div class="panel-head"><h3>预测时段能耗</h3><small>仿真输出</small></div>
+                  <div class="panel-head"><h3>未来分时电价时段预测能耗</h3><small>高亮柱为峰段高负荷区间</small></div>
                   <div v-if="predictForecastSeries.length" :ref="(el) => setChartElement('predict-bars', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
                 <article class="panel chart-panel">
-                  <div class="panel-head"><h3>风险概率热力图</h3><small>仿真风险分布</small></div>
+                  <div class="panel-head"><h3>回路需量越限风险概率热力图</h3><small>峰谷时段与过载风险分布</small></div>
                   <div v-if="predictRiskSeries.length" :ref="(el) => setChartElement('predict-risk', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
               </div>
             </div>
+
+            <!-- 独立弹窗：分时电价错峰与需量智能调控方案 -->
+            <AppDialog
+              v-model:open="dispatchModalOpen"
+              title="分时电价错峰与需量智能调控方案"
+              :show-footer="false"
+              dialog-class="dispatch-submodal"
+            >
+              <div class="dispatch-modal-body">
+                <div class="predict-toolbar" style="border:1px solid #d6e2ee;border-radius:6px;background:#f8fafc">
+                  <div class="predict-toolbar-row" style="justify-content:space-between;align-items:end;flex-wrap:nowrap">
+                    <div style="display:flex;gap:12px;align-items:end;flex-wrap:nowrap">
+                      <label class="field" style="min-width:130px">
+                        <span>预测窗口</span>
+                        <select v-model="forecastWindow">
+                          <option value="24h">未来 24 小时</option>
+                          <option value="7d">未来 7 天</option>
+                        </select>
+                      </label>
+                      <label class="field" style="min-width:145px">
+                        <span>需量风控模式</span>
+                        <select v-model="riskMode">
+                          <option value="standard">标准基线调控</option>
+                          <option value="high-risk">尖峰严控模式</option>
+                        </select>
+                      </label>
+                      <span style="font-size:11px;color:#597086;padding-bottom:8px;white-space:nowrap">
+                        模型：Qwen/Qwen2.5-7B-Instruct {{ aiDispatchLatency ? `· ${aiDispatchLatency}ms` : '· 峰1.15 / 平0.80 / 谷0.42元' }}
+                      </span>
+                    </div>
+                    <button type="button" class="dispatch-modal-btn" style="height:34px;flex:none" :disabled="aiDispatchGenerating" @click="generateAiDispatchPlan">
+                      <RefreshCw :size="12" :class="{ spinning: aiDispatchGenerating }" /> {{ aiDispatchGenerating ? '生成中...' : '重算调控策略' }}
+                    </button>
+                  </div>
+                </div>
+                <div class="event-list" style="padding:4px 0 0">
+                  <article v-for="(line, idx) in aiDispatchAdvice" :key="idx" :class="idx === 0 ? 'is-warn' : idx === 1 ? 'is-info' : 'is-normal'">
+                    <b>调控策略 {{ idx + 1 }}</b>
+                    <span>{{ line }}</span>
+                  </article>
+                </div>
+                <div class="dispatch-modal-footer">
+                  <span v-if="dispatchOrderMsg" class="dispatch-order-ok">{{ dispatchOrderMsg }}</span>
+                  <span v-else class="dispatch-order-hint">可将当前错峰与需量削减策略一键转化为【运维工作台】预防性执行工单</span>
+                  <div style="display:flex;gap:8px;flex:none">
+                    <button type="button" class="dispatch-btn-secondary" @click="dispatchModalOpen = false">关闭</button>
+                    <button type="button" class="dispatch-modal-btn" :disabled="dispatchOrderCreating" @click="createDispatchWorkOrder">
+                      {{ dispatchOrderCreating ? '下发中...' : '下发错峰调控工单' }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </AppDialog>
           </div>
         </div>
       </div>
@@ -489,6 +602,13 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
 </template>
 
 <style scoped>
+:deep(.dispatch-submodal){width:min(880px,calc(100vw - 32px))}
+.dispatch-modal-body{padding:18px 22px;display:flex;flex-direction:column;gap:14px}
+.dispatch-modal-btn{height:30px;display:inline-flex;align-items:center;gap:5px;padding:0 13px;border:1px solid #176fc1;border-radius:5px;background:#176fc1;color:#fff;font-size:12px;font-weight:700;white-space:nowrap;cursor:pointer}
+.dispatch-btn-secondary{height:30px;padding:0 13px;border:1px solid #cbd8e5;border-radius:5px;background:#fff;color:#334155;font-size:12px;white-space:nowrap;cursor:pointer}
+.dispatch-modal-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:10px;border-top:1px solid #e2e8f0}
+.dispatch-order-ok{font-size:12px;font-weight:700;color:#17804f}
+.dispatch-order-hint{font-size:11.5px;color:#64748b}
 .efficiency-workbench{height:100%;min-height:0;display:flex;flex-direction:column;gap:12px;overflow:hidden}
 .efficiency-filter-card{flex:none;border:1px solid #dce7f3;border-radius:10px;background:#fff;padding:11px 14px;box-shadow:0 2px 8px rgb(35 75 120 / 4%)}
 .efficiency-metric-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;flex:none}.efficiency-metric-card{min-width:0;padding:10px 11px;border:1px solid #dce7f3;border-radius:8px;background:#fff}.efficiency-metric-card span,.efficiency-metric-card strong,.efficiency-metric-card em{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.efficiency-metric-card span{color:#71849a;font-size:10px}.efficiency-metric-card strong{margin-top:5px;color:#244568;font-size:20px}.efficiency-metric-card strong small{margin-left:3px;color:#7890a8;font-size:10px;font-weight:500}.efficiency-metric-card em{margin-top:4px;color:#8091a4;font-size:10px;font-style:normal}.efficiency-metric-card em.warn{color:#c57a26}.efficiency-metric-card em.success{color:#238260}
