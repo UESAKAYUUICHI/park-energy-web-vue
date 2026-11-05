@@ -22,13 +22,12 @@ const tab = computed<Tab>(() => {
   }
   return aliases[value] || 'three-phase-monitor'
 })
-const tabs: Array<{ key: Tab; label: string; icon: typeof Activity; description: string }> = [
-  { key: 'three-phase-monitor', label: '三相监测', icon: Activity, description: '三相平衡、电压电流越限、电网频率质量' },
-  { key: 'power-efficiency-analysis', label: '功率分析', icon: Gauge, description: '功率因数、无功损耗、负载率趋势' },
-  { key: 'energy-consume-statistics', label: '能耗统计', icon: History, description: '日周月能耗、峰谷波动、累计趋势' },
-  { key: 'data-model-predict', label: '负荷预测与调控', icon: TrendingUp, description: '时序负荷预测、尖峰需量风险热力与分时电价错峰调控' },
+const tabs: Array<{ key: Tab; label: string; icon: typeof Activity }> = [
+  { key: 'three-phase-monitor', label: '三相监测', icon: Activity },
+  { key: 'power-efficiency-analysis', label: '功率分析', icon: Gauge },
+  { key: 'energy-consume-statistics', label: '能耗统计', icon: History },
+  { key: 'data-model-predict', label: '负荷预测', icon: TrendingUp },
 ]
-const activeTab = computed(() => tabs.find((item) => item.key === tab.value) ?? tabs[0]!)
 function switchTab(next: string) {
   const normalized = ['three-phase-monitor', 'power-efficiency-analysis', 'energy-consume-statistics', 'data-model-predict'].includes(next) ? next as Tab : 'three-phase-monitor'
   void router.replace({ query: normalized === 'three-phase-monitor' ? {} : { tab: normalized } })
@@ -38,8 +37,8 @@ function switchTab(next: string) {
 <template>
   <section class="power-efficiency-page">
     <header class="power-efficiency-head">
-      <div class="power-efficiency-title"><h1>电力能效</h1><p>{{ activeTab.description }}</p></div>
-      <nav class="power-efficiency-tabs" aria-label="电力能效功能切换"><button v-for="item in tabs" :key="item.key" :class="{ active: tab === item.key }" :title="item.description" @click="switchTab(item.key)"><component :is="item.icon" :size="15" /><span>{{ item.label }}</span></button></nav>
+      <div class="power-efficiency-title"><h1>能源监测</h1></div>
+      <nav class="power-efficiency-tabs" aria-label="电力能效功能切换"><button v-for="item in tabs" :key="item.key" :class="{ active: tab === item.key }" @click="switchTab(item.key)"><component :is="item.icon" :size="15" /><span>{{ item.label }}</span></button></nav>
     </header>
     <div class="power-efficiency-content"><PowerEfficiencyWorkbench dense :page="tab" :show-headline="false" :show-page-switcher="false" @switch-page="switchTab" /></div>
   </section>

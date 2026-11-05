@@ -35,57 +35,46 @@ const aiDispatchGenerating = ref(false)
 const dispatchOrderCreating = ref(false)
 const dispatchOrderMsg = ref('')
 const aiDispatchLatency = ref(0)
-const aiDispatchAdvice = ref<string[]>([
-  '1. 峰段预冷平移：明日 14:00-16:00 预测负荷峰值达 34.8 kW（峰段电价 1.15 元/kWh），建议在 12:00-13:00 平段（0.80 元/kWh）提前开启三层办公区多联机预冷，峰段调高设定温度 1.5°C，预计削减尖峰需量 5.6 kW。',
-  '2. 恒温实验烘箱错峰排产：将一层实验室 2 台高温实验烘箱（6.5 kW）由 09:00-11:00 峰段平移至 22:00 后谷段（0.42 元/kWh）定时运行，单次作业可降低电度成本 63.5%。',
-  '3. 停用基线闭环约束：结合 19:00 停用基线（3.20 kW）自动核查夜间非必要待机支路，预计全回路日均综合节电 38.4 kWh，折合日节约电费约 31.20 元。',
-])
+const aiDispatchAdvice = ref<string[]>([])
 
 async function generateAiDispatchPlan() {
+  if (!deviceId.value) { dispatchOrderMsg.value = '请选择设备'; return }
   aiDispatchGenerating.value = true
+  dispatchOrderMsg.value = ''
   const t0 = performance.now()
   try {
-    const res = await callAiLlmProxy({
-      model: 'Qwen/Qwen2.5-7B-Instruct',
-      systemPrompt: '你是园区能源系统的负荷预测与分时电价错峰调控专家。请根据输入的预测峰值、分时电价（峰1.15/平0.80/谷0.42元/kWh）给出3条简明具体的错峰调控与需量削减策略（每条一行，带预计削减功率或节费效果）。',
-      userPrompt: `预测窗口：${forecastWindow.value}，风险模式：${riskMode.value}，负荷扰动系数：${loadPerturbation.value}。明日14:00-16:00预测峰值约34.8kW（额定上限40kW），回路包含三层办公多联机空调与一层实验烘箱。`,
-    })
-    const txt = String(res?.content || '').trim()
-    if (txt && !txt.startsWith('{')) {
-      const lines = txt.split('\n').map((s) => s.trim()).filter((s) => s.length > 6)
-      if (lines.length >= 2) aiDispatchAdvice.value = lines.slice(0, 4)
-    }
-    aiDispatchLatency.value = Math.round(performance.now() - t0)
-  } catch {
-    aiDispatchLatency.value = Math.round(performance.now() - t0)
+    const res = await callAiLlmProxy({ deviceId: deviceId.value })
+    const structured = res.structured as { inspectionSteps?: string[] } | undefined
+    aiDispatchAdvice.value = structured?.inspectionSteps || []
+    if (!aiDispatchAdvice.value.length) dispatchOrderMsg.value = String(res.message || '暂无辅助建议')
+  } catch (e) {
+    dispatchOrderMsg.value = e instanceof Error ? e.message : '生成建议失败'
   } finally {
+    aiDispatchLatency.value = Math.round(performance.now() - t0)
     aiDispatchGenerating.value = false
   }
 }
 
 async function createDispatchWorkOrder() {
+  if (!deviceId.value || !aiDispatchAdvice.value.length) return
   dispatchOrderCreating.value = true
+  dispatchOrderMsg.value = ''
   try {
     const res = await createAiDiagnosisWorkOrder({
-      eventId: 'E-001',
-      title: `【主动错峰调控】${forecastWindow.value === '24h' ? '明日24h' : '未来7d'}峰段多联机预冷与谷段排产任务`,
-      priority: riskMode.value === 'high-risk' ? 'P1' : 'P2',
-      description: aiDispatchAdvice.value.join('\n'),
+      deviceId: deviceId.value, title: '用能优化现场核查',
+      priority: 'P2', description: aiDispatchAdvice.value.join('\n'),
     })
-    const orderNo = String((res as any)?.workOrder?.work_order_no || (res as any)?.work_order_no || 'WO-DISPATCH-01')
-    dispatchOrderMsg.value = `已下发预防性错峰调控工单（单号：${orderNo}），已同步至【运维工作台】`
-  } catch {
-    dispatchOrderMsg.value = '已下发预防性错峰调控工单，已同步至【运维工作台】'
-  } finally {
-    dispatchOrderCreating.value = false
-  }
+    dispatchOrderMsg.value = '已创建工单：' + String(res.work_order_no || res.id)
+  } catch (e) {
+    dispatchOrderMsg.value = e instanceof Error ? e.message : '创建工单失败'
+  } finally { dispatchOrderCreating.value = false }
 }
 const { schedule: scheduleLoad, cancel: cancelScheduledLoad } = useDebouncedTask(300)
 
 function today() { return new Date().toISOString().slice(0, 10) }
 function daysAgo(days: number) { const date = new Date(); date.setDate(date.getDate() - days); return date.toISOString().slice(0, 10) }
 function number(value: unknown) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : 0 }
-function display(value: unknown, digits = 2) { return number(value).toLocaleString('zh-CN', { maximumFractionDigits: digits }) }
+function display(value: unknown, digits = 2) { return value == null || !Number.isFinite(Number(value)) ? '—' : Number(value).toLocaleString('zh-CN', { maximumFractionDigits: digits }) }
 function rowsOf(value: unknown): RecordRow[] { return Array.isArray(value) ? value as RecordRow[] : [] }
 function setChartElement(key: string, element: HTMLElement | null) { chartElements.value[key] = element }
 
@@ -104,7 +93,7 @@ function createEmptyThreePhaseData(): ThreePhaseMonitorData {
 function createEmptyAnalysisData(): PowerEfficiencyAnalysisData {
   return {
     metrics: [],
-    gaugeValue: 0,
+    gaugeValue: null,
     powerSeries: [],
     composition: [],
     loadSeries: [],
@@ -217,8 +206,8 @@ function optionPhaseCompare(): EChartsCoreOption {
     xAxis: { type: 'category', data: rows.map((item) => item.phase), axisLabel: { color: '#718096' } },
     yAxis: [{ type: 'value', name: '电压(V)', axisLabel: { color: '#718096' }, splitLine: { lineStyle: { color: '#ecf1f7' } } }, { type: 'value', name: '电流(A)', axisLabel: { color: '#718096' }, splitLine: { show: false } }],
     series: [
-      { type: 'bar', name: '电压', barWidth: 18, yAxisIndex: 0, itemStyle: { color: '#2364c8', borderRadius: [6, 6, 0, 0] }, data: rows.map((item) => Number(item.voltage || 0)) },
-      { type: 'line', name: '电流', yAxisIndex: 1, smooth: true, symbol: 'circle', symbolSize: 8, lineStyle: { color: '#f0a646', width: 2 }, itemStyle: { color: '#f0a646' }, data: rows.map((item) => Number(item.current || 0)) },
+      { type: 'bar', name: '电压', barWidth: 18, yAxisIndex: 0, itemStyle: { color: '#2364c8', borderRadius: [6, 6, 0, 0] }, data: rows.map((item) => item.voltage ?? null) },
+      { type: 'line', name: '电流', yAxisIndex: 1, smooth: true, symbol: 'circle', symbolSize: 8, lineStyle: { color: '#f0a646', width: 2 }, itemStyle: { color: '#f0a646' }, data: rows.map((item) => item.current ?? null) },
     ],
   }
 }
@@ -326,8 +315,8 @@ function optionForecast(data: Array<{ time: string; actual: number; predict: num
     series: [
       { name: '历史负荷', type: 'line', smooth: true, showSymbol: false, lineStyle: { color: '#2364c8', width: 2 }, areaStyle: { color: 'rgba(35,100,200,.12)' }, data: data.map((item) => item.actual) },
       { name: '预测负荷', type: 'line', smooth: true, showSymbol: true, symbolSize: 7, lineStyle: { color: '#f0a646', width: 2, type: 'dashed' }, itemStyle: { color: '#f0a646' }, data: data.map((item) => item.predict) },
-      { name: '置信下界', type: 'line', smooth: true, showSymbol: false, lineStyle: { color: '#7fc4d4', width: 1, opacity: 0 }, areaStyle: { color: 'rgba(127,196,212,.12)' }, data: data.map((item) => item.low) },
-      { name: '置信上界', type: 'line', smooth: true, showSymbol: false, lineStyle: { color: '#7fc4d4', width: 1, opacity: 0 }, areaStyle: { color: 'rgba(127,196,212,.12)' }, data: data.map((item) => item.high) },
+      { name: '历史样本下界', type: 'line', smooth: true, showSymbol: false, lineStyle: { color: '#7fc4d4', width: 1, opacity: 0 }, areaStyle: { color: 'rgba(127,196,212,.12)' }, data: data.map((item) => item.low) },
+      { name: '历史样本上界', type: 'line', smooth: true, showSymbol: false, lineStyle: { color: '#7fc4d4', width: 1, opacity: 0 }, areaStyle: { color: 'rgba(127,196,212,.12)' }, data: data.map((item) => item.high) },
     ],
   }
 }
@@ -342,7 +331,7 @@ async function renderCharts() {
   const definitions: Array<[string, EChartsCoreOption]> = props.page === 'three-phase-monitor'
     ? [['three-phase-compare', optionPhaseCompare()], ['three-phase-voltage', optionLineSeries(threePhaseVoltageSeries.value as Array<RecordRow & { time: string }>, ['A', 'B', 'C'], true, true)], ['three-phase-current', optionLineSeries(threePhaseCurrentSeries.value as Array<RecordRow & { time: string }>, ['A', 'B', 'C'], true, true)], ['three-phase-frequency', optionLineSeries(threePhaseFrequencySeries.value as Array<RecordRow & { time: string }>, ['frequency'], false, false)]]
     : props.page === 'power-efficiency-analysis'
-      ? [['analysis-gauge', optionGauge(analysis.value.gaugeValue || 0)], ['analysis-power', optionStackedArea(analysisPowerSeries.value as Array<RecordRow & { time: string }>, ['active', 'reactive', 'apparent'], ['#2364c8', '#f0a646', '#6d5dfc'])], ['analysis-composition', optionPie((analysisComposition.value || []).map((item) => ({ name: String(item.name), value: number(item.value) })), ['#2364c8', '#f0a646', '#d66457'])], ['analysis-load', optionLineSeries(analysisLoadSeries.value as Array<RecordRow & { time: string }>, ['rate'], false, false)]]
+      ? [['analysis-gauge', optionGauge(analysis.value.gaugeValue ?? 0)], ['analysis-power', optionLineSeries(analysisPowerSeries.value as Array<RecordRow & { time: string }>, ['active', 'reactive', 'apparent'], false, false)], ['analysis-composition', { xAxis: { type: 'category', data: analysisComposition.value.map(item => item.name) }, yAxis: { type: 'value' }, series: [{ type: 'bar', data: analysisComposition.value.map(item => item.value) }] }], ['analysis-load', optionLineSeries(analysisLoadSeries.value as Array<RecordRow & { time: string }>, ['rate'], false, false)]]
       : props.page === 'energy-consume-statistics'
         ? [['statistics-cumulative', optionLineSeries(statisticsCumulativeSeries.value as Array<RecordRow & { time: string }>, ['value'], true, false)], ['statistics-interval', optionTrendBars(statisticsIntervalSeries.value as Array<RecordRow & { time: string; value: number; peak?: boolean }>)], ['statistics-heatmap', optionHeatmap(statisticsHeatmapSeries.value as Array<RecordRow & { day: string; slot: string; value: number }>)] ]
         : [['predict-forecast', optionForecast(predictHistorySeries.value as Array<RecordRow & { time: string; actual: number; predict: number | null; low: number | null; high: number | null }>)] , ['predict-bars', optionForecastBars(predictForecastSeries.value as Array<RecordRow & { time: string; value: number; peak?: boolean }>)] , ['predict-risk', optionRiskHeatmap(predictRiskSeries.value as Array<RecordRow & { risk: string; time: string; value: number }> )]]
@@ -424,7 +413,7 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
           <div>
             <p>POWER · EFFICIENCY · QUALITY</p>
             <h2>{{ pageTitle }}</h2>
-            <small>{{ pageSubTitle }} · {{ contextHint }}</small>
+
           </div>
           <div v-if="props.showPageSwitcher" class="efficiency-state-pills">
             <button :class="{ active: isThreePhase }" @click="jumpTo('three-phase-monitor')">三相监测</button>
@@ -434,29 +423,29 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
         </div>
 
         <div class="efficiency-metric-strip">
-          <article v-for="metric in displayedMetrics" :key="String(metric.label)" class="efficiency-metric-card"><span>{{ metric.label }}</span><strong>{{ display(metric.value) }}<small>{{ metric.unit }}</small></strong><em :class="String(metric.status || 'normal')">{{ metric.hint || '当前统计' }}</em></article>
+          <article v-for="metric in displayedMetrics" :key="String(metric.label)" class="efficiency-metric-card"><span>{{ metric.label }}</span><strong>{{ display(metric.value) }}</strong><em :class="String(metric.status || 'normal')">{{ metric.hint || '当前统计' }}</em></article>
         </div>
         <div class="efficiency-scroll-shell">
           <div v-if="isThreePhase" class="page-layout three-phase-layout">
             <div class="page-main-frame page-main-frame--full">
               <div class="page-main-grid">
                 <article v-if="!props.compact" class="panel chart-panel">
-                  <div class="panel-head"><h3>三相电压 / 电流对比</h3><small>双轴联动，异常相高亮</small></div>
+                  <div class="panel-head"><h3>三相电压 / 电流对比</h3></div>
                   <div v-if="threePhasePhaseSummary.length" :ref="(el) => setChartElement('three-phase-compare', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
                 <article class="panel chart-panel">
-                  <div class="panel-head"><h3>三相电压时序</h3><small>{{ threePhase.timeGranularity || '1h' }} 粒度</small></div>
+                  <div class="panel-head"><h3>三相电压时序</h3></div>
                   <div v-if="threePhaseVoltageSeries.length" :ref="(el) => setChartElement('three-phase-voltage', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
                 <article class="panel chart-panel">
-                  <div class="panel-head"><h3>三相电流时序</h3><small>异常标记点</small></div>
+                  <div class="panel-head"><h3>三相电流时序</h3></div>
                   <div v-if="threePhaseCurrentSeries.length" :ref="(el) => setChartElement('three-phase-current', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
                 <article v-if="!props.compact" class="panel chart-panel">
-                  <div class="panel-head"><h3>电网频率质量</h3><small>观察频率稳定性</small></div>
+                  <div class="panel-head"><h3>电网频率质量</h3></div>
                   <div v-if="threePhaseFrequencySeries.length" :ref="(el) => setChartElement('three-phase-frequency', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
@@ -468,22 +457,22 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
             <div class="page-main-frame page-main-frame--full">
               <div class="page-main-grid analysis-grid">
                 <article class="panel chart-panel">
-                  <div class="panel-head"><h3>有功 / 无功 / 视在功率趋势</h3><small>时序联动</small></div>
+                  <div class="panel-head"><h3>有功 / 无功 / 视在功率趋势</h3></div>
                   <div v-if="analysisPowerSeries.length" :ref="(el) => setChartElement('analysis-power', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
                 <article v-if="!props.compact" class="panel chart-panel">
-                  <div class="panel-head"><h3>功率构成</h3><small>视在功率占比</small></div>
+                  <div class="panel-head"><h3>功率读数</h3></div>
                   <div v-if="analysisComposition.length" :ref="(el) => setChartElement('analysis-composition', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
                 <article class="panel chart-panel">
-                  <div class="panel-head"><h3>负载率趋势</h3><small>观察高负载窗口</small></div>
+                  <div class="panel-head"><h3>负载率趋势</h3></div>
                   <div v-if="analysisLoadSeries.length" :ref="(el) => setChartElement('analysis-load', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
                 <article v-if="!props.compact" class="panel chart-panel">
-                  <div class="panel-head"><h3>功率因数仪表盘</h3><small>企业级分段配色</small></div>
+                  <div class="panel-head"><h3>功率因数仪表盘</h3></div>
                   <div v-if="analysis.gaugeValue !== null && analysis.gaugeValue !== undefined" :ref="(el) => setChartElement('analysis-gauge', el as HTMLElement)" class="chart-fill gauge-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
@@ -495,17 +484,17 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
             <div class="page-main-frame page-main-frame--full">
               <div class="page-main-grid statistics-grid-layout">
                 <article class="panel chart-panel">
-                  <div class="panel-head"><h3>电能累计面积图</h3><small>真实累计值斜率反映用电速率</small></div>
+                  <div class="panel-head"><h3>电能累计面积图</h3></div>
                   <div v-if="statisticsCumulativeSeries.length" :ref="(el) => setChartElement('statistics-cumulative', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
                 <article class="panel chart-panel">
-                  <div class="panel-head"><h3>时段能耗柱状图</h3><small>高峰柱自动高亮</small></div>
+                  <div class="panel-head"><h3>时段能耗柱状图</h3></div>
                   <div v-if="statisticsIntervalSeries.length" :ref="(el) => setChartElement('statistics-interval', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
                 <article v-if="!props.compact" class="panel chart-panel span-2">
-                  <div class="panel-head"><h3>采集完整率热力图</h3><small>时段与星期维度</small></div>
+                  <div class="panel-head"><h3>采集完整率热力图</h3></div>
                   <div v-if="statisticsHeatmapSeries.length" :ref="(el) => setChartElement('statistics-heatmap', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
@@ -520,7 +509,7 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
                   <div class="panel-head">
                     <div>
                       <h3>历史实测 — 时序预测组合曲线</h3>
-                      <small>实线历史负荷，虚线预测负荷，阴影为95%置信区间</small>
+
                     </div>
                     <button type="button" class="dispatch-modal-btn" @click="dispatchModalOpen = true">
                       错峰与需量调控方案
@@ -530,12 +519,12 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
                 <article class="panel chart-panel">
-                  <div class="panel-head"><h3>未来分时电价时段预测能耗</h3><small>高亮柱为峰段高负荷区间</small></div>
+                  <div class="panel-head"><h3>未来分时电价时段预测能耗</h3></div>
                   <div v-if="predictForecastSeries.length" :ref="(el) => setChartElement('predict-bars', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
                 <article class="panel chart-panel">
-                  <div class="panel-head"><h3>回路需量越限风险概率热力图</h3><small>峰谷时段与过载风险分布</small></div>
+                  <div class="panel-head"><h3>回路需量越限风险概率热力图</h3></div>
                   <div v-if="predictRiskSeries.length" :ref="(el) => setChartElement('predict-risk', el as HTMLElement)" class="chart-fill"></div>
                   <div v-else class="chart-empty">暂无数据</div>
                 </article>
@@ -557,37 +546,31 @@ onBeforeUnmount(() => { cancelScheduledLoad(); window.removeEventListener('resiz
                         <span>预测窗口</span>
                         <select v-model="forecastWindow">
                           <option value="24h">未来 24 小时</option>
-                          <option value="7d">未来 7 天</option>
+
                         </select>
                       </label>
-                      <label class="field" style="min-width:145px">
-                        <span>需量风控模式</span>
-                        <select v-model="riskMode">
-                          <option value="standard">标准基线调控</option>
-                          <option value="high-risk">尖峰严控模式</option>
-                        </select>
-                      </label>
+
                       <span style="font-size:11px;color:#597086;padding-bottom:8px;white-space:nowrap">
-                        模型：Qwen/Qwen2.5-7B-Instruct {{ aiDispatchLatency ? `· ${aiDispatchLatency}ms` : '· 峰1.15 / 平0.80 / 谷0.42元' }}
+                        辅助建议 {{ aiDispatchLatency ? `· ${aiDispatchLatency}ms` : '' }}
                       </span>
                     </div>
                     <button type="button" class="dispatch-modal-btn" style="height:34px;flex:none" :disabled="aiDispatchGenerating" @click="generateAiDispatchPlan">
-                      <RefreshCw :size="12" :class="{ spinning: aiDispatchGenerating }" /> {{ aiDispatchGenerating ? '生成中...' : '重算调控策略' }}
+                      <RefreshCw :size="12" :class="{ spinning: aiDispatchGenerating }" /> {{ aiDispatchGenerating ? '生成中...' : '生成辅助建议' }}
                     </button>
                   </div>
                 </div>
                 <div class="event-list" style="padding:4px 0 0">
                   <article v-for="(line, idx) in aiDispatchAdvice" :key="idx" :class="idx === 0 ? 'is-warn' : idx === 1 ? 'is-info' : 'is-normal'">
-                    <b>调控策略 {{ idx + 1 }}</b>
+                    <b>核查步骤 {{ idx + 1 }}</b>
                     <span>{{ line }}</span>
                   </article>
                 </div>
                 <div class="dispatch-modal-footer">
                   <span v-if="dispatchOrderMsg" class="dispatch-order-ok">{{ dispatchOrderMsg }}</span>
-                  <span v-else class="dispatch-order-hint">可将当前错峰与需量削减策略一键转化为【运维工作台】预防性执行工单</span>
+
                   <div style="display:flex;gap:8px;flex:none">
                     <button type="button" class="dispatch-btn-secondary" @click="dispatchModalOpen = false">关闭</button>
-                    <button type="button" class="dispatch-modal-btn" :disabled="dispatchOrderCreating" @click="createDispatchWorkOrder">
+                    <button type="button" class="dispatch-modal-btn" :disabled="dispatchOrderCreating || !aiDispatchAdvice.length" @click="createDispatchWorkOrder">
                       {{ dispatchOrderCreating ? '下发中...' : '下发错峰调控工单' }}
                     </button>
                   </div>

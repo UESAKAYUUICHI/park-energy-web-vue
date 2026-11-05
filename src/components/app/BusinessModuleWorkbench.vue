@@ -17,7 +17,7 @@ defineEmits<{ change: [view: string] }>()
   <section class="view-page business-module-workbench">
     <header class="view-head business-module-head">
       <div>
-        <p class="eyebrow">{{ eyebrow }}</p>
+
         <h1>{{ title }}</h1>
       </div>
       <div class="business-module-actions"><slot name="actions" /></div>

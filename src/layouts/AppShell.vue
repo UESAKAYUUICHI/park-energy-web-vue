@@ -86,23 +86,23 @@ const item = (name: string): NavItem => {
   return { name, path: String(current?.path || '/dashboard'), title: String(current?.meta?.title || name), permission: current?.meta?.permission as string | undefined, icon: navIcons[name] || ChartNoAxesCombined }
 }
 const nav = computed<NavGroup[]>((): NavGroup[] => [
-  { key: 'dashboard', label: '数据总览', icon: groupIcon('dashboard'), items: [item('dashboard'), item('energy-screen')] },
-  { key: 'assets', label: '组织和资产', icon: groupIcon('assets'), items: [item('device-archive-org-tree'), item('device-archive-devices')] },
-  { key: 'catalog', label: '模型与字典', icon: groupIcon('catalog'), items: [item('product-catalog'), item('protocol-catalog'), item('global-attributes'), item('global-points')] },
-  { key: 'efficiency', label: '能效与分析', icon: groupIcon('efficiency'), items: [item('power-efficiency')], forceCollapsible: true },
-  { key: 'operations', label: '告警与运维', icon: groupIcon('operations'), items: [item('alarms-events'), item('alarms-protocols'), item('operations-work-orders'), item('operations-inspections')] },
-  { key: 'access', label: '设备接入', icon: groupIcon('access'), items: [item('access-diagnostic'), item('edge-config'), item('access-control')] },
-  { key: 'billing', label: '结算与财务', icon: groupIcon('revenue'), items: [item('billing-overview'), item('billing-rules-workspace'), item('billing-payment-workspace'), item('billing-archive-workspace')] },
-  { key: 'system', label: '系统治理', icon: groupIcon('system'), items: isAdmin.value ? [item('archive-spaces'), item('archive-gateways'), item('archive-device-types'), item('archive-point-definitions'), item('system-tenants'), item('system-users'), item('system-roles'), item('system-permissions'), item('system-rbac-workbench'), item('system-user-org-bindings'), item('system-audit')] : [item('system-rbac-workbench'), item('system-audit')] },
+  { key: 'dashboard', label: '能源总览', icon: groupIcon('dashboard'), items: [item('dashboard'), item('energy-screen')] },
+  { key: 'efficiency', label: '监测分析', icon: groupIcon('efficiency'), items: [item('power-efficiency')], forceCollapsible: true },
+  { key: 'operations', label: '能效改善', icon: groupIcon('operations'), items: [item('alarms-events'), item('operations-work-orders'), item('operations-inspections'), item('alarms-protocols')] },
+  { key: 'assets', label: '能源档案', icon: groupIcon('assets'), items: [item('device-archive-org-tree'), item('device-archive-devices'), item('archive-spaces')] },
+  { key: 'access', label: '边缘采集', icon: groupIcon('access'), items: [item('access-diagnostic'), item('edge-config'), item('access-control')] },
+  { key: 'catalog', label: '设备模型', icon: groupIcon('catalog'), items: [item('product-catalog'), item('protocol-catalog'), item('global-attributes'), item('global-points')] },
+  { key: 'billing', label: '费用结算', icon: groupIcon('revenue'), items: [item('billing-overview'), item('billing-rules-workspace'), item('billing-payment-workspace'), item('billing-archive-workspace')] },
+  { key: 'system', label: '系统管理', icon: groupIcon('system'), items: isAdmin.value ? [item('archive-gateways'), item('archive-device-types'), item('archive-point-definitions'), item('system-tenants'), item('system-users'), item('system-roles'), item('system-permissions'), item('system-rbac-workbench'), item('system-user-org-bindings'), item('system-audit')] : [item('system-rbac-workbench'), item('system-audit')] },
 ])
 const visible = (entry: NavItem) => session.can(entry.permission)
 const isSimpleGroup = (group: NavGroup) => Boolean(group.items && group.items.length === 1 && !group.forceCollapsible)
 const fixedWorkspace = computed(() => route.name === 'power-efficiency' || route.name === 'energy-screen' || (String(route.path).startsWith('/billing/') && route.path !== '/billing/overview'))
 const mobileTabs = computed(() => [
   item('dashboard'),
-  item('device-archive-org-tree'),
+  item('power-efficiency'),
+  item('alarms-events'),
   item('operations-work-orders'),
-  item('billing-overview'),
 ])
 const entryMatchesRoute = (entry: NavItem) => {
   const path = entry.path.split('?')[0]
@@ -191,7 +191,7 @@ async function leave() {
           </transition>
         </section>
       </nav>
-      <div class="side-foot"><b>● 会话有效</b><span>ORG_SCOPE / 当前授权范围</span></div>
+      <div class="side-foot"><b>● 会话有效</b></div>
     </aside>
     <div class="main-frame"><header class="topbar"><button class="mobile-menu-trigger" type="button" aria-label="打开菜单" @click="mobileNavOpen = true"><Menu :size="20" /></button><div class="crumb">智园能管 <b>/ {{ route.meta.title }}</b></div><div class="top-actions"><button class="user-pill" type="button" title="进入个人中心" @click="router.push('/account/profile')"><span class="topbar-avatar"><img v-if="avatarUrl" :src="avatarUrl" alt="头像"><UserCircle v-else :size="15" /></span>{{ session.user?.nickname || session.user?.username || '当前用户' }}</button><button class="logout-icon" title="退出登录" aria-label="退出登录" @click="leave"><LogOut :size="16" /></button></div></header><main class="workspace" :class="{ 'workspace-fixed': fixedWorkspace }"><RouterView v-slot="{ Component, route: viewRoute }"><Transition name="page-motion" mode="out-in" appear><component :is="Component" :key="viewRoute.fullPath" /></Transition></RouterView></main><nav class="mobile-tabbar" aria-label="主要导航"><button v-for="entry in mobileTabs" :key="entry.name" type="button" :class="{ active: route.path === entry.path }" @click="navigateMobile(entry)"><component :is="entry.icon" :size="19" /><span>{{ entry.title }}</span></button><button type="button" :class="{ active: mobileNavOpen }" @click="mobileNavOpen = true"><Menu :size="19" /><span>更多</span></button></nav></div>
   </div>

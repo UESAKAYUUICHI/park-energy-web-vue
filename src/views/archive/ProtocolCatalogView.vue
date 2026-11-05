@@ -139,194 +139,34 @@ const stagePrompts = reactive({
 });
 const aiParseOpen = ref(false);
 const aiParsing = ref(false);
-const aiDocText = ref(`《正泰 DTSU666 三相四线电子式电能表 Modbus-RTU 通信协议说明书（摘录）》
-1. 串口参数：波特率 9600 bps，数据位 8，无校验(N)，停止位 1。支持功能码 03H（读保持寄存器）、06H（写单个寄存器）。
-2. 电参量测量寄存器表（IEEE-754 单精度浮点 FLOAT32，大端字节序 ABCD，每个测点占 2 个寄存器）：
-   - 0x2000 (十进制 8192): Ua A相相电压，单位 V，倍率 0.1
-   - 0x2002 (十进制 8194): Ub B相相电压，单位 V，倍率 0.1
-   - 0x2004 (十进制 8196): Uc C相相电压，单位 V，倍率 0.1
-   - 0x2006 (十进制 8198): Ia A相电流，单位 A，倍率 0.001
-   - 0x2008 (十进制 8200): Ib B相电流，单位 A，倍率 0.001
-   - 0x200A (十进制 8202): Ic C相电流，单位 A，倍率 0.001
-   - 0x2012 (十进制 8210): Pt 总有功功率，单位 kW，倍率 0.001
-   - 0x2014 (十进制 8212): Qt 总无功功率，单位 kvar，倍率 0.001
-   - 0x201A (十进制 8214): PFt 总功率因数，无量纲，倍率 0.001
-   - 0x201E (十进制 8216): Freq 电网频率，单位 Hz，倍率 0.01
-3. 电能计量寄存器表（FLOAT32，ABCD）：
-   - 0x4000 (十进制 16384): ImpEp 正向有功总电能，单位 kWh，倍率 1.0
-4. 远程继电器控制寄存器（功能码 06H，UINT16）：
-   - 0x6000 (十进制 24576): 写入 0xFF00 (65280) 远程合闸；写入 0x0000 (0) 远程分闸。`);
+const aiDocText = ref("");
+const parseError = ref("");
 const aiParsedResult = ref<RecordRow | null>(null);
 
 const uploadedPdfName = ref("");
 
-function buildDefaultParsedResult(fileName = "正泰DTSU666三相电能表Modbus协议说明书.pdf"): RecordRow {
-  const suffix = new Date().toTimeString().slice(0, 5).replace(":", "");
-  const upper = fileName.toUpperCase();
-  const isNbp = upper.includes("NBP") || fileName.includes("断路器");
-  if (isNbp) {
-    return {
-      fileName,
-      deviceCategory: "电能表外置断路器 / 光伏并离网费控断路器 (BREAKER)",
-      profileCode: `CHINT_NBP_GVT_${suffix}`,
-      profileName: "正泰 NBP 系列电能表外置断路器协议 (NBP-GVT/ZSW)",
-      manufacturer: "正泰电器 (CHINT ELECTRIC)",
-      transportType: "MODBUS_RTU",
-      versionName: "V1",
-      description: `由《${fileName}》解析生成：含 13 项静态属性(评估新增6项)、2 个读块、10 项动态测点(评估新增8项)与 3 项控制指令`,
-      newStaticAttrCount: 6,
-      newDynamicPointCount: 8,
-      blockCount: 2,
-      alignedCount: 10,
-      commandCount: 3,
-      model: "Qwen/Qwen2.5-7B-Instruct",
-      latencyMs: 560,
-      summary: `已解析《${fileName}》：识别外置断路器品类，匹配 7 项存量静态属性并评估新增 6 项断路器静态属性；匹配 2 项存量测点并评估新增 8 项断路器状态与过欠压/过欠频保护定值动态测点，生成 3 项费控指令。`,
-      protocolAttributes: [],
-      staticAttrEvalList: [
-        { attributeCode: "MANUFACTURER", attributeName: "制造商", attributeValue: "正泰电器 (CHINT ELECTRIC)", evalStatus: "MATCHED", evalLabel: "匹配存量字典" },
-        { attributeCode: "PRODUCT_SERIES", attributeName: "产品系列", attributeValue: "NBP-ZS / NBP-ZW / NBP-GV 系列", evalStatus: "MATCHED", evalLabel: "匹配存量字典" },
-        { attributeCode: "MODEL_SPECIFICATION", attributeName: "型号规格", attributeValue: "NBP-100GVT/L · NBP-125GVT · NBP-80ZSW", evalStatus: "MATCHED", evalLabel: "匹配存量字典" },
-        { attributeCode: "RATED_VOLTAGE", attributeName: "额定工作电压", attributeValue: "AC230V(1P+N/2P) / AC400V(3P+N/4P)", evalStatus: "MATCHED", evalLabel: "匹配存量字典" },
-        { attributeCode: "RATED_CURRENT", attributeName: "额定工作电流", attributeValue: "63A / 80A / 100A / 125A", evalStatus: "MATCHED", evalLabel: "匹配存量字典" },
-        { attributeCode: "COMMUNICATION_INTERFACE", attributeName: "通信接口", attributeValue: "RS-485 / 蓝牙无线 / AC220V电平控制", evalStatus: "MATCHED", evalLabel: "匹配存量字典" },
-        { attributeCode: "FIELD_PROTOCOL", attributeName: "现场协议", attributeValue: "DL/T 698.45 (Modbus网关透明映射)", evalStatus: "MATCHED", evalLabel: "匹配存量字典" },
-        { attributeCode: "POLE_CONFIG", attributeName: "断路器极数规格", attributeValue: "1P+N(N极可开闭) / 2P / 3P+N / 4P", evalStatus: "EVAL_NEW", evalLabel: "字典缺失 · 评估后新增" },
-        { attributeCode: "BREAKING_CAPACITY_ICN", attributeName: "额定短路分断能力(Icn)", attributeValue: "6000A(N型) / 10000A(H型)", evalStatus: "EVAL_NEW", evalLabel: "字典缺失 · 评估后新增" },
-        { attributeCode: "TRIP_CURVE_TYPE", attributeName: "瞬时脱扣特性曲线", attributeValue: "C型(5In~10In) / D型(10In~14In)", evalStatus: "EVAL_NEW", evalLabel: "字典缺失 · 评估后新增" },
-        { attributeCode: "MECHANICAL_ELECTRICAL_LIFE", attributeName: "机械与电气寿命", attributeValue: "机械寿命10000次 / 电气寿命6000次", evalStatus: "EVAL_NEW", evalLabel: "字典缺失 · 评估后新增" },
-        { attributeCode: "AUTO_CLOSE_OPEN_TIME", attributeName: "远程自动合分闸时间", attributeValue: "自动合闸 tc≤3s / 自动分闸 td≤2s", evalStatus: "EVAL_NEW", evalLabel: "字典缺失 · 评估后新增" },
-        { attributeCode: "ANTI_ISLANDING_SPEC", attributeName: "光伏防孤岛保护定值", attributeValue: "500ms内电压摆动>30V或频率摆动>0.5Hz动作(恢复延时10s)", evalStatus: "EVAL_NEW", evalLabel: "字典缺失 · 评估后新增" },
-      ],
-      readBlocks: [
-        { blockCode: "BREAKER_STATUS_BLOCK", blockName: "断路器状态与泄漏电流读块(0x0100-0x0104)", functionCode: 3, startAddress: 256, registerCount: 5, pollMode: "CYCLIC", required: 1 },
-        { blockCode: "PROTECTION_THRESHOLD_BLOCK", blockName: "过欠失压与过欠频保护定值读块(0x0200-0x0204)", functionCode: 3, startAddress: 512, registerCount: 5, pollMode: "CYCLIC", required: 1 },
-      ],
-      fields: [
-        { fieldCode: "VOLTAGE_A", fieldName: "相线工作电压", blockCode: "BREAKER_STATUS_BLOCK", documentAddress: "0x0100", registerOffset: 0, registerLength: 1, valueType: "UINT16", byteOrder: "AB", decodeFactor: 0.1, rawUnit: "V", evalStatus: "MATCHED", evalLabel: "匹配存量字典" },
-        { fieldCode: "FREQUENCY", fieldName: "电网实时频率", blockCode: "BREAKER_STATUS_BLOCK", documentAddress: "0x0101", registerOffset: 1, registerLength: 1, valueType: "UINT16", byteOrder: "AB", decodeFactor: 0.01, rawUnit: "Hz", evalStatus: "MATCHED", evalLabel: "匹配存量字典" },
-        { fieldCode: "BREAKER_SWITCH_STATE", fieldName: "断路器分合闸状态(0分/1合/2防合闸)", blockCode: "BREAKER_STATUS_BLOCK", documentAddress: "0x0102", registerOffset: 2, registerLength: 1, valueType: "UINT16", byteOrder: "AB", decodeFactor: 1.0, rawUnit: "", evalStatus: "EVAL_NEW", evalLabel: "字典缺失 · 评估后新增" },
-        { fieldCode: "PHASE_LEAKAGE_CURRENT", fieldName: "相线泄漏电流(IL)", blockCode: "BREAKER_STATUS_BLOCK", documentAddress: "0x0103", registerOffset: 3, registerLength: 1, valueType: "UINT16", byteOrder: "AB", decodeFactor: 0.01, rawUnit: "mA", evalStatus: "EVAL_NEW", evalLabel: "字典缺失 · 评估后新增" },
-        { fieldCode: "PROTECTION_TRIP_REASON", fieldName: "保护脱扣动作原因字", blockCode: "BREAKER_STATUS_BLOCK", documentAddress: "0x0104", registerOffset: 4, registerLength: 1, valueType: "UINT16", byteOrder: "AB", decodeFactor: 1.0, rawUnit: "", evalStatus: "EVAL_NEW", evalLabel: "字典缺失 · 评估后新增" },
-        { fieldCode: "OVERVOLTAGE_THRESHOLD", fieldName: "过压保护动作阈值(Uvo默认290V)", blockCode: "PROTECTION_THRESHOLD_BLOCK", documentAddress: "0x0200", registerOffset: 0, registerLength: 1, valueType: "UINT16", byteOrder: "AB", decodeFactor: 1.0, rawUnit: "V", evalStatus: "EVAL_NEW", evalLabel: "字典缺失 · 评估后新增" },
-        { fieldCode: "OVERVOLTAGE_RECOVERY_VAL", fieldName: "过压恢复阈值(Urvo默认280V)", blockCode: "PROTECTION_THRESHOLD_BLOCK", documentAddress: "0x0201", registerOffset: 1, registerLength: 1, valueType: "UINT16", byteOrder: "AB", decodeFactor: 1.0, rawUnit: "V", evalStatus: "EVAL_NEW", evalLabel: "字典缺失 · 评估后新增" },
-        { fieldCode: "UNDERVOLTAGE_THRESHOLD", fieldName: "欠压保护动作阈值(Uvu默认160V)", blockCode: "PROTECTION_THRESHOLD_BLOCK", documentAddress: "0x0202", registerOffset: 2, registerLength: 1, valueType: "UINT16", byteOrder: "AB", decodeFactor: 1.0, rawUnit: "V", evalStatus: "EVAL_NEW", evalLabel: "字典缺失 · 评估后新增" },
-        { fieldCode: "LOSS_VOLTAGE_THRESHOLD", fieldName: "失压保护动作阈值(默认50V)", blockCode: "PROTECTION_THRESHOLD_BLOCK", documentAddress: "0x0203", registerOffset: 3, registerLength: 1, valueType: "UINT16", byteOrder: "AB", decodeFactor: 1.0, rawUnit: "V", evalStatus: "EVAL_NEW", evalLabel: "字典缺失 · 评估后新增" },
-        { fieldCode: "OVER_FREQ_THRESHOLD", fieldName: "过频保护动作阈值(默认50.5Hz)", blockCode: "PROTECTION_THRESHOLD_BLOCK", documentAddress: "0x0204", registerOffset: 4, registerLength: 1, valueType: "UINT16", byteOrder: "AB", decodeFactor: 0.01, rawUnit: "Hz", evalStatus: "EVAL_NEW", evalLabel: "字典缺失 · 评估后新增" },
-      ],
-      commands: [
-        { commandCode: "DIRECT_CLOSE_CMD", commandName: "直接合闸命令(由分闸直接合闸)", functionCode: 6, registerAddress: 24576, encodeType: "FIXED", valueType: "UINT16", fixedValue: 65280, enabled: 1 },
-        { commandCode: "TRIP_LOCK_CMD", commandName: "跳闸并进入防合闸锁定命令", functionCode: 6, registerAddress: 24576, encodeType: "FIXED", valueType: "UINT16", fixedValue: 0, enabled: 1 },
-        { commandCode: "ALLOW_CLOSE_CMD", commandName: "合闸允许解除防合闸命令", functionCode: 6, registerAddress: 24576, encodeType: "FIXED", valueType: "UINT16", fixedValue: 255, enabled: 1 },
-      ],
-    };
-  }
-  const isAdl400 = upper.includes("ADL400");
-  const isAcrel = isAdl400 || upper.includes("PZ") || fileName.includes("安科瑞");
-  if (isAcrel) {
-    return {
-      fileName,
-      deviceCategory: "导轨式多功能电能表 (ELECTRIC_METER)",
-      staticSpecSummary: "BAUD_RATE=9600, DATA_BITS=8, PARITY=N, STOP_BITS=1",
-      profileCode: isAdl400 ? `ACREL_ADL400_${suffix}` : `ACREL_PZ96L_${suffix}`,
-      profileName: isAdl400 ? "安科瑞 ADL400 导轨式多功能电能表协议" : "安科瑞 PZ96L 多功能电力仪表协议",
-      manufacturer: "安科瑞电气股份有限公司 (ACREL)",
-      transportType: "MODBUS_RTU",
-      versionName: "V1",
-      description: `由上传文件《${fileName}》经通用四阶段规则解析：含 2 个连续读块、9 项标准测点映射与 2 项控制指令`,
-      blockCount: 2,
-      alignedCount: 9,
-      commandCount: 2,
-      model: "Qwen/Qwen2.5-7B-Instruct",
-      latencyMs: 490,
-      summary: `已按通用四阶段规则解析《${fileName}》：识别安科瑞导轨表 UINT16/INT32 混合编码，合并生成 2 个连续读块并绑定 9 项标准测点。`,
-      readBlocks: [
-        { blockCode: "ELECTRICAL_BLOCK", blockName: "ADL400电参量连续读块(0x0061-0x0077)", functionCode: 3, startAddress: 97, registerCount: 23, pollMode: "CYCLIC", required: 1 },
-        { blockCode: "ENERGY_BLOCK", blockName: "ADL400有功总电能读块(0x0000-0x0001)", functionCode: 3, startAddress: 0, registerCount: 2, pollMode: "CYCLIC", required: 1 },
-      ],
-      fields: [
-        { fieldCode: "VOLTAGE_A", fieldName: "A相电压", standardPointId: 1, blockCode: "ELECTRICAL_BLOCK", documentAddress: "0x0061", registerOffset: 0, registerLength: 1, valueType: "UINT16", byteOrder: "AB", decodeFactor: 0.1, rawUnit: "V", accessMode: "R", required: 1 },
-        { fieldCode: "VOLTAGE_B", fieldName: "B相电压", standardPointId: 2, blockCode: "ELECTRICAL_BLOCK", documentAddress: "0x0062", registerOffset: 1, registerLength: 1, valueType: "UINT16", byteOrder: "AB", decodeFactor: 0.1, rawUnit: "V", accessMode: "R", required: 1 },
-        { fieldCode: "VOLTAGE_C", fieldName: "C相电压", standardPointId: 3, blockCode: "ELECTRICAL_BLOCK", documentAddress: "0x0063", registerOffset: 2, registerLength: 1, valueType: "UINT16", byteOrder: "AB", decodeFactor: 0.1, rawUnit: "V", accessMode: "R", required: 1 },
-        { fieldCode: "CURRENT_A", fieldName: "A相电流", standardPointId: 4, blockCode: "ELECTRICAL_BLOCK", documentAddress: "0x0064", registerOffset: 3, registerLength: 1, valueType: "UINT16", byteOrder: "AB", decodeFactor: 0.01, rawUnit: "A", accessMode: "R", required: 1 },
-        { fieldCode: "CURRENT_B", fieldName: "B相电流", standardPointId: 5, blockCode: "ELECTRICAL_BLOCK", documentAddress: "0x0065", registerOffset: 4, registerLength: 1, valueType: "UINT16", byteOrder: "AB", decodeFactor: 0.01, rawUnit: "A", accessMode: "R", required: 1 },
-        { fieldCode: "CURRENT_C", fieldName: "C相电流", standardPointId: 6, blockCode: "ELECTRICAL_BLOCK", documentAddress: "0x0066", registerOffset: 5, registerLength: 1, valueType: "UINT16", byteOrder: "AB", decodeFactor: 0.01, rawUnit: "A", accessMode: "R", required: 1 },
-        { fieldCode: "ACTIVE_POWER_TOTAL", fieldName: "总有功功率", standardPointId: 7, blockCode: "ELECTRICAL_BLOCK", documentAddress: "0x0067", registerOffset: 6, registerLength: 2, valueType: "INT32", byteOrder: "ABCD", decodeFactor: 0.001, rawUnit: "kW", accessMode: "R", required: 1 },
-        { fieldCode: "FREQUENCY", fieldName: "电网频率", standardPointId: 10, blockCode: "ELECTRICAL_BLOCK", documentAddress: "0x0077", registerOffset: 22, registerLength: 1, valueType: "UINT16", byteOrder: "AB", decodeFactor: 0.01, rawUnit: "Hz", accessMode: "R", required: 1 },
-        { fieldCode: "FORWARD_ACTIVE_ENERGY", fieldName: "正向有功总电能", standardPointId: 11, blockCode: "ENERGY_BLOCK", documentAddress: "0x0000", registerOffset: 0, registerLength: 2, valueType: "UINT32", byteOrder: "ABCD", decodeFactor: 0.01, rawUnit: "kWh", accessMode: "R", required: 1 },
-      ],
-      commands: [
-        { commandCode: "BREAKER_CLOSE", commandName: "远程合闸指令", functionCode: 6, registerAddress: 24576, encodeType: "FIXED", valueType: "UINT16", fixedValue: 65280, enabled: 1 },
-        { commandCode: "BREAKER_OPEN", commandName: "远程分闸指令", functionCode: 6, registerAddress: 24576, encodeType: "FIXED", valueType: "UINT16", fixedValue: 0, enabled: 1 },
-      ],
-    };
-  }
-  return {
-    fileName,
-    deviceCategory: "三相四线电子式电能表 (ELECTRIC_METER)",
-    staticSpecSummary: "BAUD_RATE=9600, DATA_BITS=8, PARITY=N, STOP_BITS=1",
-    profileCode: `CHINT_DTSU666_${suffix}`,
-    profileName: "正泰 DTSU666 三相电子式电能表协议",
-    manufacturer: "浙江正泰仪器仪表 (CHINT)",
-    transportType: "MODBUS_RTU",
-    versionName: "V1",
-    description: `由上传文件《${fileName}》经通用四阶段规则解析：含 2 个连续读块、11 项标准测点映射与 2 项控制指令`,
-    blockCount: 2,
-    alignedCount: 11,
-    commandCount: 2,
-    model: "Qwen/Qwen2.5-7B-Instruct",
-    latencyMs: 520,
-    summary: `已按通用四阶段规则解析《${fileName}》：自动完成十六进制偏移换算，合并生成 2 个 Modbus 03H 连续读取块并绑定 11 项平台标准测点。`,
-    readBlocks: [
-      { blockCode: "ELECTRICAL_BLOCK", blockName: "三相电参量连续读块(0x2000-0x2019)", functionCode: 3, startAddress: 8192, registerCount: 26, pollMode: "CYCLIC", required: 1 },
-      { blockCode: "ENERGY_BLOCK", blockName: "累计有功电能读块(0x4000-0x4001)", functionCode: 3, startAddress: 16384, registerCount: 2, pollMode: "CYCLIC", required: 1 },
-    ],
-    fields: [
-      { fieldCode: "VOLTAGE_A", fieldName: "A相电压", standardPointId: 1, blockCode: "ELECTRICAL_BLOCK", documentAddress: "0x2000", registerOffset: 0, registerLength: 2, valueType: "FLOAT32", byteOrder: "ABCD", decodeFactor: 0.1, rawUnit: "V", accessMode: "R", required: 1 },
-      { fieldCode: "VOLTAGE_B", fieldName: "B相电压", standardPointId: 2, blockCode: "ELECTRICAL_BLOCK", documentAddress: "0x2002", registerOffset: 2, registerLength: 2, valueType: "FLOAT32", byteOrder: "ABCD", decodeFactor: 0.1, rawUnit: "V", accessMode: "R", required: 1 },
-      { fieldCode: "VOLTAGE_C", fieldName: "C相电压", standardPointId: 3, blockCode: "ELECTRICAL_BLOCK", documentAddress: "0x2004", registerOffset: 4, registerLength: 2, valueType: "FLOAT32", byteOrder: "ABCD", decodeFactor: 0.1, rawUnit: "V", accessMode: "R", required: 1 },
-      { fieldCode: "CURRENT_A", fieldName: "A相电流", standardPointId: 4, blockCode: "ELECTRICAL_BLOCK", documentAddress: "0x2006", registerOffset: 6, registerLength: 2, valueType: "FLOAT32", byteOrder: "ABCD", decodeFactor: 0.001, rawUnit: "A", accessMode: "R", required: 1 },
-      { fieldCode: "CURRENT_B", fieldName: "B相电流", standardPointId: 5, blockCode: "ELECTRICAL_BLOCK", documentAddress: "0x2008", registerOffset: 8, registerLength: 2, valueType: "FLOAT32", byteOrder: "ABCD", decodeFactor: 0.001, rawUnit: "A", accessMode: "R", required: 1 },
-      { fieldCode: "CURRENT_C", fieldName: "C相电流", standardPointId: 6, blockCode: "ELECTRICAL_BLOCK", documentAddress: "0x200A", registerOffset: 10, registerLength: 2, valueType: "FLOAT32", byteOrder: "ABCD", decodeFactor: 0.001, rawUnit: "A", accessMode: "R", required: 1 },
-      { fieldCode: "ACTIVE_POWER_TOTAL", fieldName: "总有功功率", standardPointId: 7, blockCode: "ELECTRICAL_BLOCK", documentAddress: "0x2012", registerOffset: 18, registerLength: 2, valueType: "FLOAT32", byteOrder: "ABCD", decodeFactor: 0.001, rawUnit: "kW", accessMode: "R", required: 1 },
-      { fieldCode: "REACTIVE_POWER_TOTAL", fieldName: "总无功功率", standardPointId: 8, blockCode: "ELECTRICAL_BLOCK", documentAddress: "0x2014", registerOffset: 20, registerLength: 2, valueType: "FLOAT32", byteOrder: "ABCD", decodeFactor: 0.001, rawUnit: "kvar", accessMode: "R", required: 1 },
-      { fieldCode: "POWER_FACTOR_TOTAL", fieldName: "总功率因数", standardPointId: 9, blockCode: "ELECTRICAL_BLOCK", documentAddress: "0x201A", registerOffset: 22, registerLength: 2, valueType: "FLOAT32", byteOrder: "ABCD", decodeFactor: 0.001, rawUnit: "", accessMode: "R", required: 1 },
-      { fieldCode: "FREQUENCY", fieldName: "电网频率", standardPointId: 10, blockCode: "ELECTRICAL_BLOCK", documentAddress: "0x201E", registerOffset: 24, registerLength: 2, valueType: "FLOAT32", byteOrder: "ABCD", decodeFactor: 0.01, rawUnit: "Hz", accessMode: "R", required: 1 },
-      { fieldCode: "FORWARD_ACTIVE_ENERGY", fieldName: "正向有功总电能", standardPointId: 11, blockCode: "ENERGY_BLOCK", documentAddress: "0x4000", registerOffset: 0, registerLength: 2, valueType: "FLOAT32", byteOrder: "ABCD", decodeFactor: 1.0, rawUnit: "kWh", accessMode: "R", required: 1 },
-    ],
-    commands: [
-      { commandCode: "BREAKER_CLOSE", commandName: "远程合闸指令", functionCode: 6, registerAddress: 24576, encodeType: "FIXED", valueType: "UINT16", fixedValue: 65280, enabled: 1 },
-      { commandCode: "BREAKER_OPEN", commandName: "远程分闸指令", functionCode: 6, registerAddress: 24576, encodeType: "FIXED", valueType: "UINT16", fixedValue: 0, enabled: 1 },
-    ],
-  };
-}
-
 function applyParsedMetadataToForm(res: RecordRow) {
-  createForm.profileCode = String(res.profileCode || createForm.profileCode || "CHINT_DTSU666_MODBUS");
-  createForm.profileName = String(res.profileName || createForm.profileName || "正泰 DTSU666 三相电子式电能表协议");
-  createForm.manufacturer = String(res.manufacturer || createForm.manufacturer || "浙江正泰仪器仪表 (CHINT)");
+  createForm.profileCode = String(res.profileCode || createForm.profileCode || "");
+  createForm.profileName = String(res.profileName || createForm.profileName || "");
+  createForm.manufacturer = String(res.manufacturer || createForm.manufacturer || "");
   createForm.transportType = String(res.transportType || "MODBUS_RTU");
   createForm.versionName = String(res.versionName || "V1");
-  createForm.description = String(res.description || "");
+  createForm.description = "";
 }
 
 async function onProtocolFileSelect(event: Event) {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
+  const file = (event.target as HTMLInputElement).files?.[0];
   if (!file) return;
   uploadedPdfName.value = file.name;
-  const instant = buildDefaultParsedResult(file.name);
-  aiParsedResult.value = instant;
-  applyParsedMetadataToForm(instant);
+  aiParsedResult.value = null;
+  parseError.value = "";
   aiParsing.value = true;
   try {
     const res = await uploadProtocolPdf(file);
-    if (res && Array.isArray(res.fields) && res.fields.length > 0) {
-      aiParsedResult.value = res;
-      applyParsedMetadataToForm(res);
-    }
-  } catch {
-    // keep instant parsed result
+    aiParsedResult.value = res;
+    applyParsedMetadataToForm(res);
+  } catch (e) {
+    parseError.value = e instanceof Error ? e.message : "协议解析失败";
   } finally {
     aiParsing.value = false;
   }
@@ -347,46 +187,16 @@ function openCreateProtocolModal() {
 }
 
 async function runAiProtocolParse() {
-  aiParsedResult.value = {
-    blockCount: 2,
-    alignedCount: 11,
-    commandCount: 2,
-    model: 'Qwen/Qwen2.5-7B-Instruct',
-    latencyMs: 680,
-    summary: '已完成说明书寄存器表抽取与十六进制偏移换算：合并生成 2 个 Modbus 03H 连续读取块（减少总线轮询开销 81%），自动对齐绑定 11 项平台标准测点与 2 项远程分合闸控制指令。',
-    readBlocks: [
-      { blockCode: 'ELECTRICAL_BLOCK', blockName: '三相电参量连续读块(0x2000-0x2019)', functionCode: 3, startAddress: 8192, registerCount: 26, pollMode: 'CYCLIC', required: 1 },
-      { blockCode: 'ENERGY_BLOCK', blockName: '累计有功电能读块(0x4000-0x4001)', functionCode: 3, startAddress: 16384, registerCount: 2, pollMode: 'CYCLIC', required: 1 },
-    ],
-    fields: [
-      { fieldCode: 'VOLTAGE_A', fieldName: 'A相电压', standardPointId: 1, blockCode: 'ELECTRICAL_BLOCK', documentAddress: '0x2000', registerOffset: 0, registerLength: 2, valueType: 'FLOAT32', byteOrder: 'ABCD', decodeFactor: 0.1, rawUnit: 'V' },
-      { fieldCode: 'VOLTAGE_B', fieldName: 'B相电压', standardPointId: 2, blockCode: 'ELECTRICAL_BLOCK', documentAddress: '0x2002', registerOffset: 2, registerLength: 2, valueType: 'FLOAT32', byteOrder: 'ABCD', decodeFactor: 0.1, rawUnit: 'V' },
-      { fieldCode: 'VOLTAGE_C', fieldName: 'C相电压', standardPointId: 3, blockCode: 'ELECTRICAL_BLOCK', documentAddress: '0x2004', registerOffset: 4, registerLength: 2, valueType: 'FLOAT32', byteOrder: 'ABCD', decodeFactor: 0.1, rawUnit: 'V' },
-      { fieldCode: 'CURRENT_A', fieldName: 'A相电流', standardPointId: 4, blockCode: 'ELECTRICAL_BLOCK', documentAddress: '0x2006', registerOffset: 6, registerLength: 2, valueType: 'FLOAT32', byteOrder: 'ABCD', decodeFactor: 0.001, rawUnit: 'A' },
-      { fieldCode: 'CURRENT_B', fieldName: 'B相电流', standardPointId: 5, blockCode: 'ELECTRICAL_BLOCK', documentAddress: '0x2008', registerOffset: 8, registerLength: 2, valueType: 'FLOAT32', byteOrder: 'ABCD', decodeFactor: 0.001, rawUnit: 'A' },
-      { fieldCode: 'CURRENT_C', fieldName: 'C相电流', standardPointId: 6, blockCode: 'ELECTRICAL_BLOCK', documentAddress: '0x200A', registerOffset: 10, registerLength: 2, valueType: 'FLOAT32', byteOrder: 'ABCD', decodeFactor: 0.001, rawUnit: 'A' },
-      { fieldCode: 'ACTIVE_POWER_TOTAL', fieldName: '总有功功率', standardPointId: 7, blockCode: 'ELECTRICAL_BLOCK', documentAddress: '0x2012', registerOffset: 18, registerLength: 2, valueType: 'FLOAT32', byteOrder: 'ABCD', decodeFactor: 0.001, rawUnit: 'kW' },
-      { fieldCode: 'REACTIVE_POWER_TOTAL', fieldName: '总无功功率', standardPointId: 8, blockCode: 'ELECTRICAL_BLOCK', documentAddress: '0x2014', registerOffset: 20, registerLength: 2, valueType: 'FLOAT32', byteOrder: 'ABCD', decodeFactor: 0.001, rawUnit: 'kvar' },
-      { fieldCode: 'POWER_FACTOR_TOTAL', fieldName: '总功率因数', standardPointId: 9, blockCode: 'ELECTRICAL_BLOCK', documentAddress: '0x201A', registerOffset: 22, registerLength: 2, valueType: 'FLOAT32', byteOrder: 'ABCD', decodeFactor: 0.001, rawUnit: '' },
-      { fieldCode: 'FREQUENCY', fieldName: '电网频率', standardPointId: 10, blockCode: 'ELECTRICAL_BLOCK', documentAddress: '0x201E', registerOffset: 24, registerLength: 2, valueType: 'FLOAT32', byteOrder: 'ABCD', decodeFactor: 0.01, rawUnit: 'Hz' },
-      { fieldCode: 'FORWARD_ACTIVE_ENERGY', fieldName: '正向有功总电能', standardPointId: 11, blockCode: 'ENERGY_BLOCK', documentAddress: '0x4000', registerOffset: 0, registerLength: 2, valueType: 'FLOAT32', byteOrder: 'ABCD', decodeFactor: 1.0, rawUnit: 'kWh' },
-    ],
-    commands: [
-      { commandCode: 'BREAKER_CLOSE', commandName: '远程合闸指令', functionCode: 6, registerAddress: 24576, encodeType: 'FIXED', valueType: 'UINT16', fixedValue: 65280, enabled: 1 },
-      { commandCode: 'BREAKER_OPEN', commandName: '远程分闸指令', functionCode: 6, registerAddress: 24576, encodeType: 'FIXED', valueType: 'UINT16', fixedValue: 0, enabled: 1 },
-    ],
-  };
+  aiParsedResult.value = null;
+  parseError.value = "";
   aiParsing.value = true;
   try {
-    const res = await parseProtocolDoc({
-      profileName: version.value.profile_name || "三相智能电表 Modbus 协议",
+    aiParsedResult.value = await parseProtocolDoc({
+      profileName: version.value.profile_name || "",
       docText: aiDocText.value,
     });
-    if (res && Array.isArray(res.fields) && res.fields.length > 0) {
-      aiParsedResult.value = res;
-    }
-  } catch {
-    // keep instant parsed result
+  } catch (e) {
+    parseError.value = e instanceof Error ? e.message : "协议解析失败";
   } finally {
     aiParsing.value = false;
   }
@@ -1064,6 +874,7 @@ onMounted(() => {
             <span v-if="uploadedPdfName" class="pdf-file-tag">{{ uploadedPdfName }}</span>
             <label class="upload-pdf-btn">
               <input id="protocol-pdf-input" type="file" accept=".pdf,.txt,.md" hidden @change="onProtocolFileSelect" />
+<p v-if="parseError" role="alert">{{ parseError }}</p>
               {{ aiParsing ? '解析中...' : '上传PDF' }}
             </label>
           </div>

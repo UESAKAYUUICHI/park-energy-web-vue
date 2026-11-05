@@ -2219,7 +2219,7 @@ onBeforeUnmount(() => {
   <section class="view-page device-archive-page">
     <header class="view-head">
       <div>
-        <p class="eyebrow">DEVICE ARCHIVE</p>
+
         <h1>{{ title }}</h1>
       </div>
       <div class="head-actions">

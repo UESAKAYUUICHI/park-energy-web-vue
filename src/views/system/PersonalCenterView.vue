@@ -55,7 +55,7 @@ onMounted(load)
 
 <template>
   <section class="view-page personal-center-page">
-    <header class="view-head personal-header"><div><p class="eyebrow">MY WORKSPACE</p><h1>个人中心</h1><p class="personal-subtitle">管理你的账号资料、访问范围与登录安全。</p></div><button class="quiet" :disabled="loading" @click="load"><RefreshCw :size="15" />{{ loading ? '读取中' : '刷新' }}</button></header>
+    <header class="view-head personal-header"><div><h1>个人中心</h1></div><button class="quiet" :disabled="loading" @click="load"><RefreshCw :size="15" />{{ loading ? '读取中' : '刷新' }}</button></header>
     <p v-if="error" class="notice">{{ error }}</p>
 
     <section class="personal-overview panel">

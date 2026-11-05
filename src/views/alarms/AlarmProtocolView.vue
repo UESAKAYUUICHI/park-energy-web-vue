@@ -232,9 +232,9 @@ onMounted(async () => {
   <section class="view-page alarm-protocol-page">
     <header class="view-head">
       <div>
-        <p class="eyebrow">ALARM · PROTOCOL</p>
+
         <h1>告警协议</h1>
-        <p>按设备绑定协议，按测点维护触发与恢复条件；同一设备的同一测点只保留一条生效告警。</p>
+
       </div>
       <div class="head-actions">
         <button class="quiet" :disabled="loading" title="刷新协议列表" @click="load"><RefreshCw :size="15" />刷新</button>
@@ -261,7 +261,7 @@ onMounted(async () => {
       <section class="protocol-detail-panel">
         <template v-if="selectedProtocol">
           <header class="protocol-detail-head">
-            <div><p class="eyebrow">PROTOCOL DETAIL</p><h2>{{ field(selectedProtocol, 'protocol_name', 'protocolName') }}</h2><span class="protocol-code">{{ field(selectedProtocol, 'protocol_key', 'protocolKey') }}</span></div>
+            <div><h2>{{ field(selectedProtocol, 'protocol_name', 'protocolName') }}</h2><span class="protocol-code">{{ field(selectedProtocol, 'protocol_key', 'protocolKey') }}</span></div>
             <span class="status-pill large" :class="statusTone(selectedProtocol)">{{ protocolStatus(selectedProtocol) }}</span>
           </header>
           <div class="detail-actions">
@@ -314,7 +314,7 @@ onMounted(async () => {
         </div>
         <div class="editor-section">
           <div class="section-heading"><strong>监测测点与告警条件</strong><button class="link-btn" type="button" @click="form.points.push(blankPoint())"><Plus :size="13" />添加测点</button></div>
-          <p class="editor-tip">每个测点只能配置一条条件。触发后保持一条生效告警，达到恢复阈值后才允许再次触发。</p>
+
           <div v-for="(point, index) in form.points" :key="index" class="point-editor">
             <div class="point-editor-head"><b>测点 {{ index + 1 }}</b><button class="icon-btn danger-text" type="button" title="删除测点" aria-label="删除测点" @click="removePoint(index)"><X :size="15" /></button></div>
             <div class="point-editor-grid">

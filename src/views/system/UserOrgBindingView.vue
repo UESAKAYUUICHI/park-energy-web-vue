@@ -107,7 +107,7 @@ onMounted(load)
 <template>
   <section class="view-page user-org-binding-page">
     <header class="view-head">
-      <div><p class="eyebrow">USER ORG SCOPE</p><h1>用户组织绑定</h1></div>
+      <div><h1>用户组织绑定</h1></div>
       <button class="quiet" @click="load">刷新</button>
     </header>
     <div class="org-binding-board">

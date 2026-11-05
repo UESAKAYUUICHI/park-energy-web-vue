@@ -712,7 +712,7 @@ onMounted(async () => {
   <section class="view-page operations-page">
     <header class="view-head">
       <div>
-        <p class="eyebrow">OPERATIONS · SLA · TRACE</p>
+
         <h1>运维工作台</h1>
       </div>
     </header>
@@ -800,18 +800,13 @@ onMounted(async () => {
             <div class="order-suggestion">
               <Lightbulb :size="15" /><span
                 ><b>{{
-                  ['VERIFYING', 'CLOSED'].includes(String(row.status)) && row.pre_disposal_kw
-                    ? `运行复核：${Number(row.pre_disposal_kw).toFixed(2)} → ${Number(row.post_disposal_kw || 3.01).toFixed(2)} kW (已回落无复发) · 损耗 3.76 元`
-                    : String(row.title || '').includes('通信') || String(row.title || '').includes('质量')
-                      ? '采集质量拦截：窗口完整率 58.8% (低于80%门控阈值 · 阻断能耗误报)'
-                      : '诊断依据：19:00停用后维持 11.96 kW (高于参照基线 3.20 kW · 孤立森林评分 0.96)'
+                  row.verification_verdict === 'IMPROVED' ? '观察期负荷下降'
+                    : row.verification_verdict === 'DETERIORATED' ? '观察期负荷上升'
+                    : row.verification_verdict === 'UNCHANGED' ? '观察期负荷无变化'
+                    : row.verification_verdict === 'NOT_APPLICABLE' ? '不适用能效核验' : '待核验'
                 }}</b
                 ><small>{{
-                  ['VERIFYING', 'CLOSED'].includes(String(row.status))
-                    ? (row.verification_remark || '处置后负荷已回落至运行参照基线范围，连续观察窗口无反弹复发，满足验收条件')
-                    : String(row.title || '').includes('通信') || String(row.title || '').includes('质量')
-                      ? '排查顺序：1.核查网关本地Outbox队列与RS485通道通信成功率 → 2.比对表计现场读数 → 3.补齐窗口样本后重算'
-                      : '排查顺序：1.先核实空间夜间延期使用备案 → 2.再确认弱电与安防常开基线 → 3.最后现场检查并关断分体空调与照明支路'
+                  row.verification_remark || row.alarm_suggestion || '—'
                 }}</small></span
               >
             </div>
@@ -969,7 +964,7 @@ onMounted(async () => {
             <section class="inspection-task-section">
               <div class="inspection-task-head">
                 <div>
-                  <p class="eyebrow">TODAY'S CHECKLIST</p>
+
                   <h2>当天巡检任务</h2>
                 </div>
                 <span>{{ tasks.length }} 项</span>
@@ -1029,7 +1024,7 @@ onMounted(async () => {
         <section v-else class="inspection-plan-page">
           <header class="inspection-plan-head">
             <div>
-              <p class="eyebrow">INSPECTION PLAN</p>
+
               <h2>巡检计划</h2>
             </div>
             <div>

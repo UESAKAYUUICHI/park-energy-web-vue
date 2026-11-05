@@ -46,7 +46,6 @@ export const dashboard = (params: Record<string, unknown> = {}) => request<Recor
 export const billingErp = (stage: 'overview' | 'admission' | 'schemes' | 'jobs' | 'closing', params: Record<string, unknown> = {}) => request<RecordRow>(`/billing-erp/${stage}${toQuery(params)}`)
 export const billingErpSubject = (accountId: unknown, params: Record<string, unknown> = {}) => request<RecordRow>(`/billing-erp/subjects/${accountId}${toQuery(params)}`)
 export const billingErpPeriod = (periodId: unknown) => request<RecordRow>(`/billing-erp/periods/${periodId}`)
-export const prepareDemo325Billing = (params: Record<string, unknown> = {}) => request<RecordRow>(`/billing-erp/demo325/prepare${toQuery(params)}`, { method: 'POST' })
 export const profileSummary = () => request<RecordRow>('/profile/summary')
 export const updateMyProfile = (body: RecordRow) => request<RecordRow>('/profile/self', { method: 'PUT', ...json(body) })
 export const uploadMyAvatar = (file: File) => { const body = new FormData(); body.append('file', file); return request<RecordRow>('/profile/self/avatar', { method: 'POST', body }) }
@@ -252,6 +251,5 @@ export const aiDiagnosisWorkbench = () => request<RecordRow>('/ai-diagnosis/work
 export const evaluateAiScene = (body: RecordRow) => request<RecordRow>('/ai-diagnosis/evaluate', { method: 'POST', ...json(body) })
 export const createAiDiagnosisWorkOrder = (body: RecordRow) => request<RecordRow>('/ai-diagnosis/create-work-order', { method: 'POST', ...json(body) })
 export const callAiLlmProxy = (body: RecordRow) => request<RecordRow>('/ai-diagnosis/llm-proxy', { method: 'POST', ...json(body) })
-export const resetAiDemoFlow = () => request<RecordRow>('/ai-diagnosis/reset-demo-flow', { method: 'POST' })
-export const parseProtocolDoc = (body: RecordRow) => request<RecordRow>('/ai-diagnosis/parse-protocol-doc', { method: 'POST', ...json(body) })
-export const uploadProtocolPdf = (file: File) => { const body = new FormData(); body.append('file', file); return request<RecordRow>('/ai-diagnosis/upload-protocol-pdf', { method: 'POST', body }) }
+export const parseProtocolDoc = (body: RecordRow) => request<RecordRow>('/protocol-import/parse', { method: 'POST', ...json(body) })
+export const uploadProtocolPdf = (file: File) => { const body = new FormData(); body.append('file', file); return request<RecordRow>('/protocol-import/upload', { method: 'POST', body }) }

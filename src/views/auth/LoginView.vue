@@ -20,7 +20,6 @@ const agreementBody = ref<HTMLElement | null>(null)
 const router = useRouter()
 const route = useRoute()
 const session = useSessionStore()
-const localTestLogin = computed(() => username.value.trim() === 'test' && password.value === 'test')
 
 function loginRoleLabel() {
   const labels: Record<string, string> = {
@@ -72,7 +71,7 @@ async function doLogin() {
 }
 
 async function submit() {
-  if (!localTestLogin.value && captchaInput.value.trim().toUpperCase() !== captcha.value) {
+  if (captchaInput.value.trim().toUpperCase() !== captcha.value) {
     error.value = '验证码失败'
     randomCaptcha()
     captchaInput.value = ''
@@ -116,7 +115,7 @@ onMounted(randomCaptcha)
     <section class="login-copy">
       <div class="brand"><i></i><span>智园能管<small>ENERGY PLATFORM</small></span></div>
       <div class="login-copy-body">
-        <p class="eyebrow">PARK ENERGY OPERATIONS</p>
+
         <h1>AI全域能源精益计量运营平台</h1>
         <div class="login-accent"></div>
       </div>
@@ -127,7 +126,7 @@ onMounted(randomCaptcha)
         <span>扫码下载App</span>
         <QrCode :size="18" />
       </div>
-      <p class="eyebrow">登录系统</p>
+
       <h2>综合能源智慧运营平台</h2>
       <div class="login-underline"></div>
       <form class="login-form" @submit.prevent="submit">
@@ -163,7 +162,7 @@ onMounted(randomCaptcha)
       <section class="login-agreement-dialog">
         <div class="agreement-head">
           <div>
-            <p class="eyebrow">USER AGREEMENT</p>
+
             <h2>智园能管用户须知协议</h2>
           </div>
           <button class="close-icon" type="button" aria-label="关闭" @click="closeAgreement">×</button>

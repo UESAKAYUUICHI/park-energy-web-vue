@@ -289,7 +289,7 @@ onMounted(() => { load(); loadLookups() })
 onBeforeUnmount(() => { if (keywordTimer) clearTimeout(keywordTimer) })
 </script>
 <template>
-  <section class="view-page system-page"><header class="view-head"><div><p class="eyebrow">SYSTEM & ACCESS CONTROL</p><h1>{{ title }}</h1></div></header>
+  <section class="view-page system-page"><header class="view-head"><div><h1>{{ title }}</h1></div></header>
     <template v-if="mode === 'profile'">
       <div class="profile-grid">
         <article class="panel profile-session-card">

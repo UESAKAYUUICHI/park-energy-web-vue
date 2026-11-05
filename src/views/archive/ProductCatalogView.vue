@@ -817,7 +817,7 @@ onMounted(async () => { protocolOptions.value = await publishedProtocolVersions(
 <template>
   <section class="view-page catalog-page">
     <header class="view-head">
-      <div><p class="eyebrow">DEVICE CATALOG</p><h1>产品目录与型号模板</h1></div>
+      <div><h1>产品目录与型号模板</h1></div>
       <button class="icon-btn" title="刷新" @click="loadAll(true)"><RefreshCw :size="16" /></button>
     </header>
     <p v-if="error" class="notice">{{ error }}</p>
@@ -844,7 +844,7 @@ onMounted(async () => { protocolOptions.value = await publishedProtocolVersions(
         <template v-if="treeMode === 'products'">
           <template v-if="selectedCategory">
             <div class="catalog-hierarchy-head">
-              <div><p class="eyebrow">PRODUCT CATALOG</p><h2>{{ selectedCategory.label }}</h2><small>品牌、系列与型号</small></div>
+              <div><h2>{{ selectedCategory.label }}</h2><small>品牌、系列与型号</small></div>
               <span>{{ productHierarchy.length }} 个品牌</span>
             </div>
             <div class="catalog-hierarchy-toolbar">
@@ -856,9 +856,9 @@ onMounted(async () => { protocolOptions.value = await publishedProtocolVersions(
               <p v-if="!productHierarchy.length" class="empty-state">当前分类下暂无品牌、系列或型号。</p>
             </div>
           </template>
-          <div v-else class="catalog-empty"><p class="eyebrow">CATALOG NAVIGATION</p><h2>请选择左侧产品分类</h2><p>左侧只保留分类导航，选择分类后在右侧按品牌、系列和型号浏览产品目录。</p></div>
+          <div v-else class="catalog-empty"><h2>请选择左侧产品分类</h2><p>左侧只保留分类导航，选择分类后在右侧按品牌、系列和型号浏览产品目录。</p></div>
         </template>
-        <div v-else class="catalog-empty"><p class="eyebrow">ATTRIBUTE CATALOG</p><h2>{{ selected?.label || '请选择属性节点' }}</h2><p>属性字典按分类树维护。选择属性组或属性节点可查看定义并继续配置。</p></div>
+        <div v-else class="catalog-empty"><h2>{{ selected?.label || '请选择属性节点' }}</h2><p>属性字典按分类树维护。选择属性组或属性节点可查看定义并继续配置。</p></div>
       </main>
 
       <main v-if="modelDialog && isModel && model.id" class="catalog-main archive-main-panel catalog-detail-overlay">
@@ -964,11 +964,11 @@ onMounted(async () => { protocolOptions.value = await publishedProtocolVersions(
             <section v-else class="panel catalog-tab-panel"><div class="panel-head"><h3>引用设备</h3><small>{{ devices.length }} 台</small></div><div class="template-filter-bar"><label class="catalog-search template-search"><Search :size="14" /><input v-model.trim="referencedDeviceKeyword" placeholder="搜索设备 SN、名称、网关或通道"></label><AppSelect v-model="referencedDeviceOrgFilter"><option value="">全部组织</option><option v-for="org in referencedDeviceOrgOptions" :key="org" :value="org">{{ org }}</option></AppSelect><AppSelect v-model="referencedDeviceStatusFilter"><option value="">全部状态</option><option v-for="status in referencedDeviceStatusOptions" :key="status" :value="status">{{ displayValue('status', status) }}</option></AppSelect></div><div class="catalog-table template-scroll"><table><thead><tr><th>设备 SN</th><th>名称</th><th>组织</th><th>网关</th><th>通道</th><th>从站 ID</th><th>状态</th></tr></thead><tbody><tr v-for="item in filteredReferencedDevices" :key="String(item.id)"><td>{{ item.device_sn }}</td><td>{{ item.device_name }}</td><td>{{ item.org_name || '—' }}</td><td>{{ item.gateway_name || item.gateway_sn || '未接入' }}</td><td>{{ item.channel_name || item.edge_channel_id || '未绑定' }}</td><td>{{ item.protocol_addr || '待填写' }}</td><td>{{ displayValue('status', item.status, item) }}</td></tr><tr v-if="!filteredReferencedDevices.length"><td colspan="7" class="empty-cell">暂无符合条件的引用设备</td></tr></tbody></table></div></section>
           </div>
         </template>
-        <div v-else class="catalog-empty"><p class="eyebrow">CATALOG NAVIGATION</p><h2>{{ selected?.label || '请选择产品型号' }}</h2><p v-if="treeMode === 'products'">从左侧展开设备分类、品牌和系列，选择具体型号后配置版本、属性、测点和协议。</p><p v-else>属性字典按分类树维护。选择属性节点可查看定义，新增属性时会自动使用当前属性组。</p></div>
+        <div v-else class="catalog-empty"><h2>{{ selected?.label || '请选择产品型号' }}</h2><p v-if="treeMode === 'products'">从左侧展开设备分类、品牌和系列，选择具体型号后配置版本、属性、测点和协议。</p><p v-else>属性字典按分类树维护。选择属性节点可查看定义，新增属性时会自动使用当前属性组。</p></div>
       </main>
     </div>
 
-    <AppDialog v-if="batchDialog" :open="Boolean(batchDialog)" dialog-class="catalog-batch-dialog" :title="batchDialog === 'attributes' ? '批量新增属性' : '批量新增测点'" :saving="saving" @update:open="(open) => { if (!open) batchDialog = null }" @submit="batchDialog === 'attributes' ? addSelectedAttributes() : addStandardPoint()"><div class="batch-select-panel"><div class="batch-select-head"><div><p class="eyebrow">{{ batchDialog === 'attributes' ? 'ATTRIBUTE SELECTION' : 'POINT SELECTION' }}</p><h3>{{ batchDialog === 'attributes' ? '选择产品属性' : '选择测点与协议' }}</h3><small>按组织树批量选择，勾选后加入当前产品版本。</small></div><label class="catalog-search batch-search"><Search :size="15" /><input v-model.trim="batchKeyword" placeholder="搜索名称、编码或分组"></label></div><div class="batch-tree-scroll"><DictionarySelectTree :nodes="batchDialog === 'attributes' ? attributeTree : pointTree" :selected="batchDialog === 'attributes' ? selectedAttributeIds : selectedPointIds" :keyword="batchKeyword" @toggle="toggleBatchSelection" /></div><div class="batch-selected-hint">已选择 <strong>{{ batchDialog === 'attributes' ? selectedAttributeIds.length : selectedPointIds.length }}</strong> 项</div></div></AppDialog>
+    <AppDialog v-if="batchDialog" :open="Boolean(batchDialog)" dialog-class="catalog-batch-dialog" :title="batchDialog === 'attributes' ? '批量新增属性' : '批量新增测点'" :saving="saving" @update:open="(open) => { if (!open) batchDialog = null }" @submit="batchDialog === 'attributes' ? addSelectedAttributes() : addStandardPoint()"><div class="batch-select-panel"><div class="batch-select-head"><div><h3>{{ batchDialog === 'attributes' ? '选择产品属性' : '选择测点与协议' }}</h3><small>按组织树批量选择，勾选后加入当前产品版本。</small></div><label class="catalog-search batch-search"><Search :size="15" /><input v-model.trim="batchKeyword" placeholder="搜索名称、编码或分组"></label></div><div class="batch-tree-scroll"><DictionarySelectTree :nodes="batchDialog === 'attributes' ? attributeTree : pointTree" :selected="batchDialog === 'attributes' ? selectedAttributeIds : selectedPointIds" :keyword="batchKeyword" @toggle="toggleBatchSelection" /></div><div class="batch-selected-hint">已选择 <strong>{{ batchDialog === 'attributes' ? selectedAttributeIds.length : selectedPointIds.length }}</strong> 项</div></div></AppDialog>
     <section v-if="validationState !== 'idle'" class="catalog-validation catalog-validation-floating panel" :class="validationState">
       <button class="catalog-validation-close" type="button" aria-label="关闭发布校验" title="关闭" @click="closeValidation"><X :size="17" /></button>
       <div class="panel-head"><h3>发布校验</h3><b :class="{ passed: validationState === 'passed' }">{{ validationState === 'running' ? '正在验证' : validationState === 'passed' ? '可以发布' : '存在阻断项' }}</b></div>

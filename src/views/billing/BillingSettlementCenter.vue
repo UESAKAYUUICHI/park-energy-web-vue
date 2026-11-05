@@ -2163,17 +2163,9 @@ watch(
     <section class="settlement-center">
       <header class="center-header">
         <div>
-          <p class="eyebrow">SETTLEMENT & FINANCE</p>
+
           <h1>{{ title }}</h1>
-          <span>{{
-            props.view === "overview"
-              ? "查看结算业务的核心待办、金额与风险。"
-              : props.view === "rules"
-                ? "合同是出账准备主线，空间和计量计价规则作为可复用基础资料。"
-                : props.view === "payments"
-                  ? "核对账单、确认应收并完成支付和流水勾兑。"
-                  : "账单结清后完成对账、凭证和结算档案归档。"
-          }}</span>
+
         </div>
         <div class="center-actions">
           <label v-if="props.view !== 'rules'"
@@ -2390,7 +2382,7 @@ watch(
         ><section class="section-toolbar">
           <div>
             <b>出账准备</b
-            ><small>先建合同绑定空间和设备，再为合同配置计价规则。</small>
+            >
           </div>
           <div class="toolbar-actions">
             <button class="quiet" @click="openAux('spaces')">
@@ -2404,7 +2396,7 @@ watch(
             <div>
               <b>合同主表</b
               ><small
-                >共 {{ contractTotal }} 份合同 · 合同是出账规则的业务载体</small
+                >共 {{ contractTotal }} 份合同</small
               >
             </div>
             <div class="table-filters">

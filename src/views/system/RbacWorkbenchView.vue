@@ -272,7 +272,7 @@ onBeforeUnmount(() => {
   <section class="view-page rbac-workbench-page">
     <header class="view-head">
       <div>
-        <p class="eyebrow">RBAC WORKBENCH</p>
+
         <h1>模块权限分配</h1>
       </div>
       <button class="icon-btn" :disabled="loading || saving" title="刷新" aria-label="刷新" @click="load"><RefreshCw :size="17" /></button>

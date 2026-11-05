@@ -85,7 +85,7 @@ onMounted(load)
 
 <template>
   <section class="view-page dictionary-page">
-    <header class="view-head"><div><p class="eyebrow">GLOBAL DICTIONARY</p><h1>{{ title }}</h1></div><button class="icon-btn" title="刷新" @click="load"><RefreshCw :size="16" /></button></header>
+    <header class="view-head"><div><h1>{{ title }}</h1></div><button class="icon-btn" title="刷新" @click="load"><RefreshCw :size="16" /></button></header>
     <p v-if="error" class="notice">{{ error }}</p>
     <article class="panel dictionary-panel"><div class="dictionary-toolbar"><label class="catalog-search"><Search :size="14" /><input v-model.trim="keyword" placeholder="搜索名称、编码或分组"></label><div class="dictionary-expand-tools"><button class="quiet" type="button" @click="expandAll"><ChevronDown :size="14" />全展开</button><button class="quiet" type="button" @click="collapseAll"><ChevronRight :size="14" />全收起</button></div><button v-if="canEdit" class="primary dictionary-create-btn" @click="openCreate('group')"><FolderPlus :size="15" />新增{{ isPoint ? '测点组' : '属性组' }}</button></div>
       <div class="dictionary-table"><table><thead><tr><th class="tree-column">名称</th><template v-if="isPoint"><th>数据类型</th><th>单位</th><th>业务角色</th></template><template v-else><th>属性/固定值编码</th><th>用途</th><th>固定值</th></template><th class="actions-col">操作</th></tr></thead><tbody>

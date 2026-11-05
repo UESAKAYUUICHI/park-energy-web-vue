@@ -47,9 +47,9 @@ const offlineDevices = computed(() => {
 })
 const cards = computed(() => [
   { label: '今日用电', value: decimal(metrics.value.todayUsage), unit: 'kWh', note: `${integer(metrics.value.orgCount)} 个组织可见`, icon: Zap, tone: 'cyan' },
-  { label: '在线网关', value: `${integer(metrics.value.onlineGatewayCount)} / ${integer(metrics.value.gatewayCount)}`, unit: '', note: '按网关实时状态统计', icon: RadioTower, tone: 'blue' },
+  { label: '在线网关', value: `${integer(metrics.value.onlineGatewayCount)} / ${integer(metrics.value.gatewayCount)}`, unit: '', note: '', icon: RadioTower, tone: 'blue' },
   { label: '在线设备', value: integer(onlineDevices.value), unit: '台', note: `共 ${integer(metrics.value.deviceCount)} 台，启用 ${integer(metrics.value.enabledDeviceCount)} 台`, icon: Cpu, tone: 'purple' },
-  { label: '待处理告警', value: integer(metrics.value.pendingAlarmCount), unit: '条', note: '当前授权范围内的生效事件', icon: BellRing, tone: 'orange' },
+  { label: '待处理告警', value: integer(metrics.value.pendingAlarmCount), unit: '条', note: '', icon: BellRing, tone: 'orange' },
   { label: '今日采集完整率', value: decimal(field(quality.value, 'complete_rate', 'completeRate')), unit: '%', note: `${integer(field(quality.value, 'received_samples', 'receivedSamples'))} / ${integer(field(quality.value, 'expected_samples', 'expectedSamples'))} 个样本`, icon: DatabaseZap, tone: 'green' },
 ])
 
@@ -113,7 +113,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resizeCharts); hour
 <template>
   <section class="dashboard-page">
     <header class="page-head">
-      <div><p>DATA OVERVIEW</p><h1>数据总览</h1><span>组织范围内的设备、采集质量、能耗与告警真实数据</span></div>
+      <div><h1>能源总览</h1></div>
       <div class="head-actions"><small>更新时间：{{ updatedAt }}</small><button :disabled="loading" @click="load"><RefreshCw :size="15" :class="{ spinning: loading }" />{{ loading ? '刷新中' : '刷新数据' }}</button></div>
     </header>
 
@@ -121,30 +121,30 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resizeCharts); hour
 
     <div class="metric-grid">
       <article v-for="item in cards" :key="item.label" class="metric-card" :class="item.tone">
-        <component :is="item.icon" :size="22" /><div><span>{{ item.label }}</span><strong>{{ item.value }} <small>{{ item.unit }}</small></strong><em>{{ item.note }}</em></div>
+        <component :is="item.icon" :size="22" /><div><span>{{ item.label }}</span><strong>{{ item.value }} <small>{{ item.unit }}</small></strong><em v-if="item.note">{{ item.note }}</em></div>
       </article>
     </div>
 
     <div class="content-grid">
       <article class="panel hero-panel">
-        <div class="panel-head"><div><h2>今日小时用电趋势</h2><p>仅汇总累计电能测点（TOTAL_ACCUMULATED）</p></div><strong>{{ decimal(metrics.todayUsage) }} <small>kWh</small></strong></div>
+        <div class="panel-head"><div><h2>今日小时用电趋势</h2></div><strong>{{ decimal(metrics.todayUsage) }} <small>kWh</small></strong></div>
         <div ref="hourlyChartEl" class="chart"></div>
-        <div v-if="!rows(payload.hourlyTrend).length" class="empty">今日尚无小时聚合数据，新上报会自动生成。</div>
+        <div v-if="!rows(payload.hourlyTrend).length" class="empty">暂无数据</div>
       </article>
 
       <article class="panel quality-panel">
-        <div class="panel-head"><div><h2>采集质量</h2><p>今日实收样本与期望样本</p></div></div>
+        <div class="panel-head"><div><h2>采集质量</h2></div></div>
         <div class="quality-value">{{ decimal(field(quality, 'complete_rate', 'completeRate')) }}<small>%</small></div>
         <div class="progress"><i :style="{ width: `${Math.min(100, numeric(field(quality, 'complete_rate', 'completeRate')))}%` }"></i></div>
         <dl><div><dt>实收样本</dt><dd>{{ integer(field(quality, 'received_samples', 'receivedSamples')) }}</dd></div><div><dt>期望样本</dt><dd>{{ integer(field(quality, 'expected_samples', 'expectedSamples')) }}</dd></div><div><dt>异常设备</dt><dd>{{ integer(field(quality, 'abnormal_device_count', 'abnormalDeviceCount')) }}</dd></div></dl>
         <button class="link-button" @click="router.push({ path: '/power-efficiency', query: { tab: 'statistics' } })">查看数据质量明细</button>
       </article>
 
-      <article class="panel"><div class="panel-head"><div><h2>近 14 日用电趋势</h2><p>累计电能日用量</p></div></div><div ref="dailyChartEl" class="chart small-chart"></div><div v-if="!rows(payload.energyTrend).length" class="empty">暂无日统计数据。</div></article>
-      <article class="panel"><div class="panel-head"><div><h2>设备运行状态</h2><p>以设备启用状态与所连网关在线状态判断</p></div></div><div ref="deviceChartEl" class="chart small-chart"></div></article>
+      <article class="panel"><div class="panel-head"><div><h2>近 14 日用电趋势</h2></div></div><div ref="dailyChartEl" class="chart small-chart"></div><div v-if="!rows(payload.energyTrend).length" class="empty">暂无日统计数据。</div></article>
+      <article class="panel"><div class="panel-head"><div><h2>设备运行状态</h2></div></div><div ref="deviceChartEl" class="chart small-chart"></div></article>
 
       <article class="panel alarm-panel">
-        <div class="panel-head"><div><h2>最新告警</h2><p>组织权限范围内最近事件</p></div><button class="link-button" @click="router.push('/alarms/events')">全部告警</button></div>
+        <div class="panel-head"><div><h2>最新告警</h2></div><button class="link-button" @click="router.push('/alarms/events')">全部告警</button></div>
         <div class="table-wrap"><table><thead><tr><th>设备</th><th>告警内容</th><th>级别</th><th>发生时间</th></tr></thead><tbody><tr v-for="row in alarms" :key="String(field(row, 'id'))"><td>{{ field(row, 'device_name', 'deviceName') || '-' }}</td><td>{{ field(row, 'alarm_content', 'alarmContent', 'rule_name', 'ruleName') || '-' }}</td><td>{{ field(row, 'alarm_level', 'alarmLevel') || '-' }}</td><td>{{ formatDateTime(field(row, 'alarm_time', 'alarmTime')) }}</td></tr><tr v-if="!alarms.length"><td colspan="4" class="empty-cell">暂无告警数据</td></tr></tbody></table></div>
       </article>
     </div>
