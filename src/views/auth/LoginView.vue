@@ -116,7 +116,7 @@ onMounted(randomCaptcha)
       <div class="brand"><i></i><span>智园能管<small>ENERGY PLATFORM</small></span></div>
       <div class="login-copy-body">
 
-        <h1>AI全域能源精益计量运营平台</h1>
+        <h1>园区能源数智化平台</h1>
         <div class="login-accent"></div>
       </div>
     </section>

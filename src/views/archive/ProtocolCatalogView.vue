@@ -555,7 +555,6 @@ onMounted(() => {
     <header>
       <div>
         <h1>协议中心</h1>
-        <p>厂家协议版本、Modbus 读块、字段解码与控制白名单</p>
       </div>
       <div class="actions">
         <input
